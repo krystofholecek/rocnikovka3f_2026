@@ -1,0 +1,17 @@
+body {
+    font-family: system-ui, sans-serif;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 16px;
+    line-height: 1.5;
+}
+
+header, footer {
+    padding: 16px 0;
+}
+
+footer {
+    color: #666;
+    border-top: 1px solid #ddd;
+    margin-top: 32px;
+}

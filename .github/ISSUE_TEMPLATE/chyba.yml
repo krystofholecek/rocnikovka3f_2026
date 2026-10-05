@@ -1,0 +1,21 @@
+name: Chyba
+description: Něco nefunguje
+labels: ["bug"]
+body:
+  - type: textarea
+    id: popis
+    attributes:
+      label: Co se stalo
+    validations:
+      required: true
+  - type: textarea
+    id: kroky
+    attributes:
+      label: Jak to zopakovat
+      placeholder: |
+        1. Otevři ...
+        2. Klikni na ...
+  - type: textarea
+    id: ocekavano
+    attributes:
+      label: Co se mělo stát

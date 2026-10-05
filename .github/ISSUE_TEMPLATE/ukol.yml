@@ -1,0 +1,15 @@
+name: Úkol
+description: Nový úkol nebo funkce
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: popis
+    attributes:
+      label: Co je potřeba udělat
+    validations:
+      required: true
+  - type: textarea
+    id: hotovo
+    attributes:
+      label: Kdy je to hotové
+      description: Podle čeho poznáme, že je úkol splněný

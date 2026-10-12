@@ -1,0 +1,7 @@
+{
+  "name": "tiny",
+  "_popis": "Mini model na otestování, že všechno funguje. Poběží i na notebooku bez GPU.",
+  "model": {"vocab_size": 32000, "block_size": 128, "n_layer": 2, "n_head": 2, "n_embd": 128},
+  "train": {"batch_size": 8, "grad_accum": 1, "lr": 0.001, "warmup_steps": 20, "max_steps": 200,
+            "log_every": 20, "eval_every": 100, "eval_batches": 5}
+}

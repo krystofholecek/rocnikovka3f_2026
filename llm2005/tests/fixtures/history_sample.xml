@@ -1,0 +1,20 @@
+<mediawiki xmlns="http://www.mediawiki.org/xml/export-0.3/" version="0.3">
+  <page>
+    <title>Apple Computer</title>
+    <revision><timestamp>2004-03-01T10:00:00Z</timestamp><text>'''Apple Computer''' makes the [[Macintosh]]. {{stub}} This text is from 2004 and is long enough to be kept by the pipeline because it has more than two hundred characters in total, which is the minimum length.</text></revision>
+    <revision><timestamp>2005-11-20T10:00:00Z</timestamp><text>'''Apple Computer''' makes the [[Macintosh]] and the [[iPod|iPod music player]]. This is the version from late 2005 that the model should learn, and it is also long enough to pass the minimum length check of the pipeline.</text></revision>
+    <revision><timestamp>2006-03-01T10:00:00Z</timestamp><text>Apple announced something in 2006. FUTURE TEXT THAT MUST NOT APPEAR.</text></revision>
+  </page>
+  <page>
+    <title>Twitter</title>
+    <revision><timestamp>2006-07-15T10:00:00Z</timestamp><text>Twitter is a service founded in 2006. It must not be in the database at all because the page did not exist before the cutoff date, so no revision qualifies.</text></revision>
+  </page>
+  <page>
+    <title>Apple Inc</title>
+    <revision><timestamp>2005-01-01T00:00:00Z</timestamp><text>#REDIRECT [[Apple Computer]]</text></revision>
+  </page>
+  <page>
+    <title>Talk:Apple Computer</title>
+    <revision><timestamp>2005-01-01T00:00:00Z</timestamp><text>Discussion page that should be skipped because talk pages are not articles, even though it is from 2005 and long enough to pass the length filter easily.</text></revision>
+  </page>
+</mediawiki>

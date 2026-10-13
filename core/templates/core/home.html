@@ -1,6 +1,29 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<h1>Vítejte</h1>
-<p>Školní projekt gymnázia – téma zatím není rozhodnuto.</p>
+<h1>LLM 2005</h1>
+<p>
+    LLM 2005 je jazykový model, který trénujeme úplně od nuly – jen na textech
+    napsaných do 31. 12. 2005. Svět po tomto datu nezná: neví nic o iPhonu,
+    Bitcoinu ani ChatGPT.
+</p>
+
+<section>
+    <h2>Stav projektu</h2>
+    <ol class="milestones">
+        <li><strong>1 · Data</strong> <span>do 30. 11. 2026</span></li>
+        <li><strong>2 · Malý model</strong> <span>20. 12. 2026</span></li>
+        <li><strong>3 · Velký model</strong> <span>31. 1. 2027</span></li>
+        <li><strong>4 · Vyhodnocení a práce</strong> <span>28. 2. 2027</span></li>
+    </ol>
+</section>
+
+<section>
+    <h2>Chat</h2>
+    {# Zatím jen zašedlé políčko, model ještě není připojený. #}
+    <div class="chat">
+        <input type="text" placeholder="Chat bude brzy" aria-label="Chat bude brzy" disabled>
+        <button type="button" disabled>Odeslat</button>
+    </div>
+</section>
 {% endblock %}

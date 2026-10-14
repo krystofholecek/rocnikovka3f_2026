@@ -1,12 +1,12 @@
-# SOČ 3.F 2026 – LLM 2005
+# Ročníková práce 3.F 2026 – LLM 2005
 
-[![CI](https://github.com/krystofholecek/soc3f_2026/actions/workflows/ci.yml/badge.svg)](https://github.com/krystofholecek/soc3f_2026/actions/workflows/ci.yml)
+[![CI](https://github.com/krystofholecek/rocnikovka3f_2026/actions/workflows/ci.yml/badge.svg)](https://github.com/krystofholecek/rocnikovka3f_2026/actions/workflows/ci.yml)
 
 Vlastní jazykový model (LLM) natrénovaný **úplně od nuly** jen na textech napsaných **do 31. 12. 2005**.
 Nepoužíváme žádný hotový model (GPT, Llama…), tokenizer ani váhy. Všechno vzniká z našich dat.
 Model tedy „žije v roce 2005“: neví nic o iPhonu, Bitcoinu, covidu ani ChatGPT.
 
-Autoři: Holeček, Milý, Gregor · Školní projekt SOČ gymnázia, 2026/2027
+Autoři: Holeček, Milý, Gregor · Ročníková práce na gymnáziu, 2026/2027
 
 ## Jak to funguje
 
@@ -81,4 +81,4 @@ pytest llm2005                          # testy
 - `data/`, `checkpoints/` – data a natrénované modely (necommitují se, jsou velké)
 - `config/`, `core/`, `templates/`, `static/` – kostra webu v Djangu (na později, až bude model hotový)
 
-Jak pracujeme (větve, PR, review): viz [CONTRIBUTING.md](CONTRIBUTING.md). Plán projektu: [#6](https://github.com/krystofholecek/soc3f_2026/issues/6).
+Jak pracujeme (větve, PR, review): viz [CONTRIBUTING.md](CONTRIBUTING.md). Plán projektu: [#6](https://github.com/krystofholecek/rocnikovka3f_2026/issues/6).

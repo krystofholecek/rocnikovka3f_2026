@@ -2,7 +2,7 @@
 
 ## Úkoly
 - Každý úkol = GitHub issue. Než začneš, přiřaď si ho, ať se práce nekryje.
-- Labely: `data` (zdroje, databáze), `model` (tokenizer, trénink, pokusy), `text-prace` (psaní samotné SOČ), `bug`, `enhancement`. Web (`backend`, `frontend`) přijde na řadu až po modelu.
+- Labely: `data` (zdroje, databáze), `model` (tokenizer, trénink, pokusy), `text-prace` (psaní samotné ročníkové práce), `bug`, `enhancement`. Web (`backend`, `frontend`) přijde na řadu až po modelu.
 - Úkoly jsou rozdělené do milníků podle fází projektu (Data → Malý model → Velký model → Vyhodnocení a práce).
 
 ## Větve

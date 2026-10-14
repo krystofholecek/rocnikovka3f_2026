@@ -1,12 +1,12 @@
-# SOČ 3.F 2026
+# Ročníková práce 3.F 2026
 
-[![CI](https://github.com/krystofholecek/soc3f_2026/actions/workflows/ci.yml/badge.svg)](https://github.com/krystofholecek/soc3f_2026/actions/workflows/ci.yml)
+[![CI](https://github.com/krystofholecek/rocnikovka3f_2026/actions/workflows/ci.yml/badge.svg)](https://github.com/krystofholecek/rocnikovka3f_2026/actions/workflows/ci.yml)
 
-Toto je školní projekt gymnázia.
+Toto je ročníková práce na gymnáziu.
 Ještě není jasné téma projektu, ale práce na něm už začala.
 Na projektu budou pracovat Milý, Gregor a Holeček.
 
-This is a school project for the gymnasium.
+This is a year-long school project (ročníková práce) at the gymnasium.
 The project topic is not yet decided, but work has already started.
 The project is being developed by Milý, Gregor, and Holeček.
 

@@ -2,7 +2,7 @@
 
 ## Úkoly
 - Každý úkol = GitHub issue. Než začneš, přiřaď si ho, ať se práce nekryje.
-- Labely: `backend`, `frontend`, `text-prace` (psaní samotné SOČ), `bug`, `enhancement`.
+- Labely: `backend`, `frontend`, `text-prace` (psaní samotné ročníkové práce), `bug`, `enhancement`.
 
 ## Větve
 - Do `main` se nepushuje napřímo, je chráněná.

@@ -47,8 +47,11 @@ python -m llm2005.benchmark --config configs/base.json
 | Zdroj | Stav | Jak se datuje |
 | --- | --- | --- |
 | Wikipedie (historie revizí ze 16. 8. 2006, [archive.org](https://archive.org/details/enwiki-20060816-pages-meta-history.xml.7z), 5,5 GB) | parser hotový | poslední revize článku do 31. 12. 2005 |
-| Knihy Project Gutenberg | plán | datum vydání |
-| Usenet 1981–1991 | plán | datum příspěvku |
+| Knihy PG-19 (Project Gutenberg, 1483–1918) | naimportováno | rok vydání |
+| E-maily Enron 1999–2002 ([CMU](https://www.cs.cmu.edu/~enron/), 443 MB) | parser hotový | hlavička `Date:` e-mailu |
+| Blogy 2004 ([Blog Authorship Corpus](https://huggingface.co/datasets/barilan/blog_authorship_corpus), 313 MB) | parser hotový | datum příspěvku |
+| Abstrakty arXiv do 2005 ([OAI-PMH](https://oaipmh.arxiv.org/oai)) | parser hotový | datum poslední verze článku |
+| Usenet UTZOO 1981–1991 | nedostupné (od 2020 staženo z archive.org) | – |
 
 Wikipedii zpracujeme bez rozbalování na disk:
 

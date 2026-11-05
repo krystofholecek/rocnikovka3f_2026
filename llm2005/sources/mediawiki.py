@@ -53,7 +53,11 @@ SITE_URL = {
 }
 
 # Časové razítko podpisu: "12:34, 5 May 2005 (UTC)" nebo starší tvar "12:34, 2005 May 5 (UTC)"
-TIMESTAMP = r"\d{1,2}:\d{2},?\s+(?:\d{1,2}\s+[A-Z][a-z]+\.?\s+\d{4}|\d{4}\s+[A-Z][a-z]+\.?\s+\d{1,2})\s*\((?:UTC|GMT)\)"
+# a nejstarší tvar z let 2002–2003 bez "(UTC)": "02:28 Apr 16, 2003"
+TIMESTAMP = (
+    r"(?:\d{1,2}:\d{2},?\s+(?:\d{1,2}\s+[A-Z][a-z]+\.?\s+\d{4}|\d{4}\s+[A-Z][a-z]+\.?\s+\d{1,2})\s*\((?:UTC|GMT)\)"
+    r"|\d{1,2}:\d{2},?\s+[A-Z][a-z]{2,8}\.?\s+\d{1,2},\s+\d{4}(?:\s*\((?:UTC|GMT)\))?)"
+)
 # Podpis = odkaz na uživatele (+ případně odkaz na jeho diskuzi, značky, "talk") a za ním čas,
 # nebo pomlčka a odkaz na uživatele bez času ("--[[User:Bob|Bob]]").
 # Odkaz na uživatele uprostřed věty ("zeptej se [[User:Bob|Boba]]") zůstane jako jméno.
@@ -69,6 +73,7 @@ LONE_TIMESTAMP = re.compile(r"(?:-{1,2}|—|–)?[ \t]*" + TIMESTAMP)
 def clean_talk(t: str) -> str:
     """Odstraní podpisy (uživatel + čas) a pak běžné wiki značky. Text diskuze zůstane."""
     t = html.unescape(t)
+    t = re.sub(r"^-{4,}[ \t]*$", "", t, flags=re.M)  # vodorovná čára mezi příspěvky
     t = SIGNATURE.sub("", t)
     t = LONE_TIMESTAMP.sub("", t)
     t = re.sub(r"~{3,5}", "", t)  # nevyplněný podpis

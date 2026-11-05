@@ -58,9 +58,11 @@ def test_clean_talk_removes_signatures():
     t = mediawiki.clean_talk(
         "I agree. --[[User:Bob|Bob]] 10:00, 2 June 2005 (UTC)\n"
         ":Me too [[User:Ann|Ann]] <small>([[User talk:Ann|talk]])</small> 11:00, 2005 Jun 2 (UTC)\n"
-        "Ask [[User:Carl|Carl]] about it. ~~~~"
+        "Ask [[User:Carl|Carl]] about it. ~~~~\n"
+        "----\n"
+        "Orphan page. [[User:Kim|Kim]] 02:28 Apr 16, 2003"
     )
-    assert t == "I agree.\nMe too\nAsk Carl about it."  # jméno uprostřed věty zůstane
+    assert t == "I agree.\nMe too\nAsk Carl about it.\n\nOrphan page."  # jméno uprostřed věty zůstane
     assert "UTC" not in t and "[[" not in t
 
 

@@ -51,7 +51,18 @@ python -m llm2005.benchmark --config configs/base.json
 | E-maily Enron 1999–2002 ([CMU](https://www.cs.cmu.edu/~enron/), 443 MB) | parser hotový | hlavička `Date:` e-mailu |
 | Blogy 2004 ([Blog Authorship Corpus](https://huggingface.co/datasets/barilan/blog_authorship_corpus), 313 MB) | parser hotový | datum příspěvku |
 | Abstrakty arXiv do 2005 ([OAI-PMH](https://oaipmh.arxiv.org/oai)) | parser hotový | datum poslední verze článku |
-| Usenet UTZOO 1981–1991 | nedostupné (od 2020 staženo z archive.org) | – |
+| Diskuze Wikipedie (Talk, User talk, Wikipedia, Wikipedia talk; stejný dump 2006-11-04) | parser hotový, `wikitalk` | poslední revize stránky; upravené po 2005 → odmítnuto |
+| Wikibooks, Wikinews, Wikiquote, Wikisource ([dumpy 12/2006](https://dumps.wikimedia.org/archive/2006/2006-12/), 360 MB) | naimportováno | poslední revize stránky; upravené po 2005 → odmítnuto |
+| Usenet UTZOO 1981–1991 ([SourceForge](https://sourceforge.net/projects/utzoo/), ~2–3 GB; z archive.org staženo 2020) | parser hotový, `usenet` | hlavička `Date:` příspěvku |
+| Soudní rozhodnutí USA 1980–2005 ([CourtListener bulk](https://com-courtlistener-storage.s3-us-west-2.amazonaws.com/list.html?prefix=bulk-data/), jen začátek souboru, ~10 GB) | parser hotový, `courtlistener` | `date_filed` případu; odhadnuté datum → odmítnuto |
+| SEC EDGAR | vynecháno | server vyžaduje kontaktní e-mail v hlavičce požadavku |
+
+Moderní zdroje (UTZOO, diskuze Wikipedie, CourtListener) se stahují a importují jednou dlouhou úlohou, kroky jdou postupně (SQLite snese jen jeden zapisující proces):
+
+```bash
+python -m llm2005.modern_data            # vše
+python -m llm2005.modern_data --only usenet
+```
 
 Wikipedii zpracujeme bez rozbalování na disk:
 

@@ -104,6 +104,10 @@ details summary { cursor: pointer; color: var(--ink-2); margin-top: 10px; min-he
     <div class="sub" id="subtitle">Načítám stav…</div>
   </div>
   <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+    <div role="group" aria-label="Která úloha" style="display:flex; gap:4px">
+      <button type="button" class="jobBtn" data-job="tokenizer" aria-pressed="false">Tokenizér</button>
+      <button type="button" class="jobBtn" data-job="prepare" aria-pressed="false">Prepare</button>
+    </div>
     <span class="pill" id="conn"><span class="dot" style="background:var(--muted)"></span> čekám</span>
     <button id="themeBtn" type="button" title="Přepnout světlý / tmavý režim">Režim: auto</button>
   </div>
@@ -126,8 +130,9 @@ details summary { cursor: pointer; color: var(--ink-2); margin-top: 10px; min-he
       <div class="tile"><div class="label">Zbývá (odhad)</div><div class="value" id="eta">–</div></div>
       <div class="tile"><div class="label">Rychlost</div><div class="value" id="rate">–</div></div>
       <div class="tile"><div class="label">Paměť procesu</div><div class="value" id="mem">–</div></div>
-      <div class="tile"><div class="label">Cílový slovník</div><div class="value" id="vocab">–</div></div>
+      <div class="tile"><div class="label" id="vocabLabel">Cílový slovník</div><div class="value" id="vocab">–</div></div>
     </div>
+    <div class="tiles" id="kindTiles"></div>
   </section>
 
   <section class="card half">
@@ -136,14 +141,14 @@ details summary { cursor: pointer; color: var(--ink-2); margin-top: 10px; min-he
   </section>
 
   <section class="card half">
-    <h2>Rychlost zpracování (znaků/s)</h2>
+    <h2>Rychlost zpracování (<span id="rateUnit">znaků/s</span>)</h2>
     <div id="rateChart"></div>
     <div class="sub" style="margin-top:6px">Svislé čárkované čáry = začátek další fáze. Při skládání tokenů knihovna nic nehlásí, proto je rychlost 0.</div>
   </section>
 
   <section class="card">
     <h2>Zdroje – kolik textu je ve směsi</h2>
-    <div class="legend">
+    <div class="legend" id="srcLegend">
       <span><i class="sw" style="background:var(--s1)"></i>vybráno do vzorku</span>
       <span><i class="sw" style="background:var(--s2)"></i>už prošlo tréninkem</span>
       <span><i class="sw outline"></i>cíl podle configs/mix.json</span>
@@ -168,13 +173,42 @@ details summary { cursor: pointer; color: var(--ink-2); margin-top: 10px; min-he
     <h2 style="margin-top:20px">30 nejdelších tokenů <span class="sub">(· = mezera, ↵ = nový řádek)</span></h2>
     <div class="chips" id="longest"></div>
   </section>
+
+  <section class="card hidden" id="compareCard">
+    <h2>Porovnání tokenizérů <span class="sub" id="compareWhen"></span></h2>
+    <div class="tiles" id="compareTiles"></div>
+    <h2 style="margin-top:20px">Znaků na token podle zdroje <span class="sub" id="compareNote"></span></h2>
+    <div class="tablewrap" id="compareTable"></div>
+    <h2 style="margin-top:20px">Ukázkové věty: starý → nový</h2>
+    <div id="compareSamples"></div>
+    <details><summary>Nejdelší „odpadní“ tokeny ve starém slovníku</summary><div class="chips" id="compareJunk"></div></details>
+  </section>
+
+  <section class="card hidden" id="checkCard">
+    <h2>Zkušební trénink (tiny) <span class="sub" id="checkWhen"></span></h2>
+    <div class="tiles" id="checkTiles"></div>
+    <div id="checkChart" style="margin-top:12px"></div>
+  </section>
+
+  <section class="card hidden" id="cleanCard">
+    <h2>Čištění dat <span class="sub" id="cleanWhen"></span></h2>
+    <p class="sub" id="cleanNote"></p>
+    <div class="tablewrap" id="cleanTable"></div>
+    <div id="mixRun"></div>
+    <h2 style="margin-top:20px">Podezřelá data (nulové datum v hlavičce)</h2>
+    <div id="datesBox" class="sub">–</div>
+  </section>
 </main>
 <div class="tip" id="tip"></div>
 
 <script>
 "use strict";
-const STATUS_URL = "/progress/tokenizer-status.json";
+// Dvě dlouhé úlohy mají stejný formát stavu (llm2005/progress.py); přepínač v hlavičce vybírá, kterou ukázat.
+const JOBS = { tokenizer: "/progress/tokenizer-status.json", prepare: "/progress/prepare-status.json" };
 const REPORT_URL = "/progress/tokenizer-report.json";
+const EXTRA_URLS = { clean: "/progress/cleaning-report.json", compare: "/progress/tokenizer-compare.json",
+                     check: "/progress/train-check.json" };
+let job = "tokenizer", manualJob = false;
 const $ = (id) => document.getElementById(id);
 const nf = new Intl.NumberFormat("cs-CZ");
 const SVGNS = "http://www.w3.org/2000/svg";
@@ -276,9 +310,10 @@ function drawRate(hist, phases) {
 }
 
 // ---------- vodorovné sloupce (zdroje) ----------
-function drawSources(sources) {
+function drawSources(sources, kind) {
   const box = $("srcChart"); box.innerHTML = "";
   if (!sources || !sources.length) { box.innerHTML = '<p class="muted">Zatím žádná data o zdrojích.</p>'; $("srcTable").innerHTML = ""; return; }
+  if (kind === "prepare") return drawPrepareSources(sources);
   const rows = sources.map(s => ({ ...s, target: s.target_chars || s.sampled_chars || 0 }))
     .sort((a, b) => (b.target || 0) - (a.target || 0));
   const maxV = Math.max(1, ...rows.map(r => Math.max(r.target || 0, r.sampled_chars || 0)));
@@ -304,11 +339,165 @@ function drawSources(sources) {
     hit.addEventListener("pointerleave", hideTip);
     svg.appendChild(hit);
   });
-  let t = "<table><tr><th>Zdroj</th><th>Cíl (znaků)</th><th>Ve vzorku (znaků)</th><th>Dokumentů</th><th>Podíl</th><th>Tréninkem prošlo</th></tr>";
+  let t = "<table><tr><th>Zdroj</th><th>Cíl (znaků)</th><th>Ve vzorku (znaků)</th><th>Dokumentů</th><th>Podíl</th><th>Tréninkem prošlo</th>" +
+    "<th>Před čištěním</th><th>Čištění odstranilo</th><th>Vyřazeno dok. (krátké)</th></tr>";
   for (const r of rows) t += `<tr><td>${esc(r.source)}</td><td>${r.whole ? "celý" : nf.format(r.target_chars || 0)}</td>` +
     `<td>${nf.format(r.sampled_chars || 0)}</td><td>${nf.format(r.sampled_docs || 0)}</td>` +
-    `<td>${r.share_percent != null ? r.share_percent.toLocaleString("cs-CZ") + " %" : "–"}</td><td>${nf.format(r.trained_chars || 0)}</td></tr>`;
+    `<td>${r.share_percent != null ? r.share_percent.toLocaleString("cs-CZ") + " %" : "–"}</td><td>${nf.format(r.trained_chars || 0)}</td>` +
+    `<td>${r.raw_chars != null ? nf.format(r.raw_chars) : "–"}</td>` +
+    `<td>${r.removed_chars != null ? nf.format(r.removed_chars) + (r.raw_chars ? " (" + pctFmt(r.removed_chars / r.raw_chars) + ")" : "") : "–"}</td>` +
+    `<td>${r.dropped_docs != null ? nf.format(r.dropped_docs) : "–"}</td></tr>`;
   $("srcTable").innerHTML = t + "</table>";
+}
+
+// prepare: plán (znaky podle směsi) vs. hotovo, a kolik z toho vzniklo tokenů
+function drawPrepareSources(sources) {
+  const box = $("srcChart");
+  const rows = sources.slice().sort((a, b) => (b.target_chars || 0) - (a.target_chars || 0));
+  const maxV = Math.max(1, ...rows.map(r => Math.max(r.target_chars || 0, r.done_chars || 0)));
+  const W = 1000, rowH = 30, L = 150, R = 190, H = rows.length * rowH + 8;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Zpracováno podle zdrojů" });
+  const x = v => (W - L - R) * v / maxV;
+  rows.forEach((r, i) => {
+    const y0 = 4 + i * rowH;
+    svg.appendChild(el("text", { x: L - 10, y: y0 + 16, "text-anchor": "end", style: "fill:var(--ink);font-size:14px" }, r.source));
+    if (r.target_chars) svg.appendChild(el("rect", { x: L, y: y0 + 3, width: Math.max(2, x(r.target_chars)), height: 16, rx: 4,
+      fill: "none", stroke: "var(--ink-2)", "stroke-dasharray": "4 3", "stroke-width": 1.2 }));
+    svg.appendChild(el("rect", { x: L, y: y0 + 3, width: x(r.done_chars || 0), height: 16, rx: 4, fill: "var(--s1)" }));
+    svg.appendChild(el("text", { x: W - R + 8, y: y0 + 16, style: "fill:var(--ink-2);font-size:13px" },
+      `${big(r.done_chars || 0)} zn. → ${big(r.tokens || 0)} tok.`));
+    const hit = el("rect", { x: 0, y: y0, width: W, height: rowH, fill: "transparent" });
+    hit.addEventListener("pointermove", ev => showTip(ev, `<b>${esc(r.source)}</b><br>plán: ${big(r.target_chars)} znaků<br>` +
+      `hotovo: ${big(r.done_chars || 0)} znaků, ${nf.format(r.done_docs || 0)} dok.<br>tokenů: ${big(r.tokens || 0)}`));
+    hit.addEventListener("pointerleave", hideTip);
+    svg.appendChild(hit);
+  });
+  box.appendChild(svg);
+  let t = "<table><tr><th>Zdroj</th><th>Plán (znaků)</th><th>Hotovo (znaků)</th><th>Dokumentů</th><th>Tokenů</th><th>Znaků/token</th></tr>";
+  for (const r of rows) t += `<tr><td>${esc(r.source)}</td><td>${nf.format(r.target_chars || 0)}</td><td>${nf.format(r.done_chars || 0)}</td>` +
+    `<td>${nf.format(r.done_docs || 0)}</td><td>${nf.format(r.tokens || 0)}</td>` +
+    `<td>${r.tokens ? (r.done_chars / r.tokens).toLocaleString("cs-CZ", { maximumFractionDigits: 2 }) : "–"}</td></tr>`;
+  $("srcTable").innerHTML = t + "</table>";
+}
+
+// ---------- čištění dat ----------
+const RULE_CZ = { uuencode: "uuencode", base64: "base64/MIME", binary_other: "jiné binární", spaces: "mezery",
+                  repeats: "opakované znaky", blank_lines: "prázdné řádky", control: "řídicí znaky" };
+function drawCleaning(r) {
+  $("cleanCard").classList.remove("hidden");
+  $("cleanWhen").textContent = r.generated_at ? `(${r.generated_at})` : "";
+  $("cleanNote").textContent = (r.sample ? "Analýza: " + r.sample + ". " : "") +
+    "Čísla = kolik znaků pravidlo odstranilo (v závorce počet dokumentů). Databáze se nemění, čistí se za běhu.";
+  const rules = r.rules || Object.keys(RULE_CZ);
+  if (r.per_source) {
+    let t = "<table><tr><th>Zdroj</th><th>Dokumentů</th><th>Znaků</th><th>Odstraněno</th>" +
+      rules.map(k => `<th>${esc(RULE_CZ[k] || k)}</th>`).join("") + "<th>Vyřazeno (krátké)</th><th>ASCII art (dok.)</th></tr>";
+    for (const p of r.per_source) {
+      t += `<tr><td>${esc(p.source)}</td><td>${nf.format(p.docs)}</td><td>${big(p.chars)}</td><td><b>${p.removed_percent.toLocaleString("cs-CZ")} %</b></td>` +
+        rules.map(k => `<td>${p.removed[k] ? big(p.removed[k]) + ` <span class="muted">(${nf.format(p.docs_with[k])})</span>` : "–"}</td>`).join("") +
+        `<td>${nf.format(p.dropped_docs)}</td><td>${nf.format(p.ascii_art_docs)}</td></tr>`;
+    }
+    $("cleanTable").innerHTML = t + "</table>";
+  }
+  const mr = r.mix_run;
+  if (mr && mr.per_source) {
+    let t = `<h2 style="margin-top:20px">Celá směs pro tokenizér <span class="sub">(${esc(mr.created_at || "")})</span></h2>` +
+      "<div class='tablewrap'><table><tr><th>Zdroj</th><th>Před čištěním</th><th>Po čištění (ve směsi)</th><th>Odstraněno</th>" +
+      rules.map(k => `<th>${esc(RULE_CZ[k] || k)}</th>`).join("") + "<th>Vyřazeno dok.</th></tr>";
+    for (const [s, c] of Object.entries(mr.per_source)) {
+      const rem = Object.values(c.removed || {}).reduce((a, b) => a + b, 0);
+      t += `<tr><td>${esc(s)}</td><td>${big(c.raw_chars)}</td><td>${big(c.chars)}</td><td><b>${c.raw_chars ? pctFmt(rem / c.raw_chars) : "–"}</b></td>` +
+        rules.map(k => `<td>${(c.removed || {})[k] ? big(c.removed[k]) : "–"}</td>`).join("") + `<td>${nf.format(c.dropped_docs)}</td></tr>`;
+    }
+    $("mixRun").innerHTML = t + "</table></div>";
+  }
+  const d = r.dates;
+  if (d) {
+    let h = `${d.applied ? "Přesunuto" : "Nalezeno"} <b>${nf.format(d.applied ? d.moved : d.found)}</b> dokumentů do tabulky rejected ` +
+      `(důvod <code>${esc(d.reason)}</code>). Nulová data: ${d.placeholder_dates.map(esc).join(", ")}; Usenet navíc vše před ${esc(d.usenet_start)}.<ul>`;
+    for (const [s, v] of Object.entries(d.by_source || {}))
+      h += `<li><b>${esc(s)}</b>: ${nf.format(v.total)} – ` + Object.entries(v.by_date).map(([k, n]) => `${esc(k)} (${nf.format(n)}×)`).join(", ") + "</li>";
+    $("datesBox").innerHTML = h + "</ul>";
+  }
+}
+
+// ---------- porovnání tokenizérů ----------
+function drawCompare(c) {
+  $("compareCard").classList.remove("hidden");
+  $("compareWhen").textContent = `(${c.generated_at}) ${c.names.old} → ${c.names.new}`;
+  const jo = c.junk_tokens.old, jn = c.junk_tokens.new, co = c.chars_per_token.old, cn = c.chars_per_token.new;
+  const tiles = [
+    ["Tokeny jen z mezer", `${jo.whitespace_only} → ${jn.whitespace_only}`],
+    ["Nejdelší token z mezer", `${jo.longest_whitespace} → ${jn.longest_whitespace} znaků`],
+    ["Tokeny z opakovaného znaku", `${jo.repeated_char} → ${jn.repeated_char}`],
+    ["… z toho delší než 8 znaků", `${jo.repeated_char_long} → ${jn.repeated_char_long}`],
+    ["Tokeny podobné base64", `${jo.base64_like} → ${jn.base64_like}`],
+    ["Znaků na token (stejný text)", `${co._all.toLocaleString("cs-CZ")} → ${cn._all.toLocaleString("cs-CZ")}`],
+  ];
+  $("compareTiles").innerHTML = tiles.map(([l, v]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v}</div></div>`).join("");
+  $("compareNote").textContent = "(" + (c.eval_note || "") + ")";
+  let t = "<table><tr><th>Zdroj</th><th>Starý</th><th>Nový</th><th>Změna</th></tr>";
+  for (const s of Object.keys(co).filter(k => k !== "_all").sort())
+    t += `<tr><td>${esc(s)}</td><td>${co[s].toLocaleString("cs-CZ")}</td><td>${cn[s].toLocaleString("cs-CZ")}</td>` +
+      `<td>${((cn[s] / co[s] - 1) * 100).toLocaleString("cs-CZ", { maximumFractionDigits: 1, signDisplay: "always" })} %</td></tr>`;
+  $("compareTable").innerHTML = t + "</table>";
+  const sm = $("compareSamples"); sm.innerHTML = "";
+  for (const s of c.samples || []) {
+    const d = document.createElement("div"); d.className = "sample";
+    d.innerHTML = `<div><b></b> <span class="sub"></span></div><div class="sub">starý</div><div class="tokens o"></div><div class="sub">nový</div><div class="tokens n"></div>`;
+    d.querySelector("b").textContent = s.label;
+    d.querySelector(".sub").textContent = `${s.old.n_tokens} → ${s.new.n_tokens} tokenů`;
+    for (const [cls, toks] of [["o", s.old.tokens], ["n", s.new.tokens]])
+      toks.forEach(tk => { const sp = document.createElement("span"); sp.textContent = visible(tk); d.querySelector(".tokens." + cls).appendChild(sp); });
+    sm.appendChild(d);
+  }
+  const jk = $("compareJunk"); jk.innerHTML = "";
+  for (const tk of (jo.examples_repeated || []).concat(jo.examples_base64 || [])) {
+    const sp = document.createElement("span"); sp.textContent = visible(tk); jk.appendChild(sp);
+  }
+}
+
+// ---------- zkušební trénink ----------
+function drawCheck(c) {
+  $("checkCard").classList.remove("hidden");
+  $("checkWhen").textContent = `(${c.generated_at}, ${c.config})`;
+  const f = c.first_loss, l = c.last_loss, v = (c.val_loss || []).slice(-1)[0];
+  const tiles = [
+    ["Loss na začátku", f ? `${f[1].toLocaleString("cs-CZ")} (krok ${f[0]})` : "–"],
+    ["Loss na konci", l ? `${l[1].toLocaleString("cs-CZ")} (krok ${l[0]})` : "–"],
+    ["Val loss na konci", v ? v[1].toLocaleString("cs-CZ") : "–"],
+    ["Loss klesá?", c.loss_decreased ? "✔ ano" : "✖ ne"],
+    ["Doba", dur(c.seconds)],
+  ];
+  $("checkTiles").innerHTML = tiles.map(([a, b]) => `<div class="tile"><div class="label">${a}</div><div class="value">${b}</div></div>`).join("");
+  const pts = c.train_loss || [], box = $("checkChart"); box.innerHTML = "";
+  if (pts.length < 2) return;
+  const W = 1000, H = 200, L = 50, R = 10, T = 10, B = 24;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Průběh loss při zkušebním tréninku" });
+  const maxS = pts[pts.length - 1][0], ys = pts.map(p => p[1]), lo = Math.min(...ys) * 0.95, hi = Math.max(...ys) * 1.02;
+  const x = s => L + (W - L - R) * s / maxS, y = v2 => T + (H - T - B) * (hi - v2) / (hi - lo);
+  for (let i = 0; i <= 4; i++) { const vv = lo + (hi - lo) * i / 4;
+    svg.appendChild(el("line", { x1: L, x2: W - R, y1: y(vv), y2: y(vv), stroke: "var(--grid)" }));
+    svg.appendChild(el("text", { x: L - 6, y: y(vv) + 4, "text-anchor": "end" }, vv.toFixed(1))); }
+  svg.appendChild(el("path", { d: pts.map((p, i) => (i ? "L" : "M") + x(p[0]).toFixed(1) + " " + y(p[1]).toFixed(1)).join(" "),
+    fill: "none", stroke: "var(--s1)", "stroke-width": 2 }));
+  svg.appendChild(el("text", { x: W - R, y: H - 6, "text-anchor": "end" }, `krok ${maxS}`));
+  box.appendChild(svg);
+}
+
+let extraStamp = {};
+async function loadExtras() {
+  for (const [k, url] of Object.entries(EXTRA_URLS)) {
+    try {
+      const res = await fetch(url + "?t=" + Date.now(), { cache: "no-store" });
+      if (!res.ok) continue;
+      const r = await res.json();
+      const stamp = JSON.stringify([r.generated_at, (r.mix_run || {}).created_at, (r.dates || {}).generated_at]);
+      if (extraStamp[k] === stamp) continue;
+      extraStamp[k] = stamp;
+      if (k === "clean") drawCleaning(r); else if (k === "compare") drawCompare(r); else drawCheck(r);
+    } catch (e) {}
+  }
 }
 
 // ---------- fáze ----------
@@ -397,16 +586,62 @@ async function loadReport(s) {
     if (res.ok) { const r = await res.json(); if (r.generated_at !== reportStamp) { reportStamp = r.generated_at; drawReport(r, s); } }
   } catch (e) {}
 }
+async function fetchStatus(name) {
+  const res = await fetch(JOBS[name] + "?t=" + Date.now(), { cache: "no-store" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.json();
+}
+function markJobButtons() {
+  document.querySelectorAll(".jobBtn").forEach(b => {
+    const on = b.dataset.job === job;
+    b.setAttribute("aria-pressed", on); b.style.background = on ? "var(--s1)" : ""; b.style.color = on ? "#fff" : "";
+  });
+}
+document.querySelectorAll(".jobBtn").forEach(b => b.onclick = () => { job = b.dataset.job; manualJob = true; markJobButtons(); tick(); });
+markJobButtons();
+
 async function tick() {
   let s = null;
   try {
-    const res = await fetch(STATUS_URL + "?t=" + Date.now(), { cache: "no-store" });
-    if (res.status === 404) { setConn(true, "spojeno"); $("subtitle").textContent = "Trénink ještě nezačal (stav zatím neexistuje)."; loadReport(null); return; }
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    s = await res.json();
+    if (!manualJob) {  // automaticky: běžící úloha, jinak ta s novějším stavem
+      const both = {};
+      for (const n of Object.keys(JOBS)) both[n] = await fetchStatus(n);
+      const cand = Object.entries(both).filter(([, v]) => v);
+      const running = cand.find(([, v]) => v.state === "running");
+      const pick = running || cand.sort((a, b) => new Date(b[1].updated_at) - new Date(a[1].updated_at))[0];
+      if (pick) { job = pick[0]; s = pick[1]; }
+      markJobButtons();
+    } else {
+      s = await fetchStatus(job);
+    }
+    loadExtras();
+    if (!s) { setConn(true, "spojeno"); $("subtitle").textContent = "Úloha ještě nezačala (stav zatím neexistuje)."; loadReport(null); return; }
   } catch (e) {
     setConn(false, location.protocol === "file:" ? "otevři přes http://localhost:8800" : "server neodpovídá");
     return;
+  }
+  const isPrep = s.kind === "prepare";
+  document.title = isPrep ? "LLM 2005 – prepare (tokeny pro trénink)" : "LLM 2005 – průběh tréninku tokenizéru";
+  document.querySelector("h1").textContent = isPrep ? "LLM 2005 – příprava dat (prepare)" : "LLM 2005 – trénink tokenizéru";
+  $("rateUnit").textContent = s.rate ? s.rate.unit : "znaků/s";
+  $("srcLegend").innerHTML = isPrep
+    ? '<span><i class="sw" style="background:var(--s1)"></i>zpracováno (znaků)</span><span><i class="sw outline"></i>plán podle směsi</span>'
+    : '<span><i class="sw" style="background:var(--s1)"></i>vybráno do vzorku</span><span><i class="sw" style="background:var(--s2)"></i>už prošlo tréninkem</span><span><i class="sw outline"></i>cíl podle configs/mix.json</span>';
+  if (isPrep) {
+    const tk = s.tokens || {}, ds = s.docs_split || {};
+    $("vocabLabel").textContent = "Zapsáno na disk";
+    $("vocab").textContent = (s.mb_written || 0).toLocaleString("cs-CZ") + " MB";
+    const tiles = [
+      ["Dokumentů", nf.format(s.docs || 0) + (ds.val != null ? ` (val ${nf.format(ds.val)})` : "")],
+      ["Tokenů train", big(tk.train || 0)], ["Tokenů val", big(tk.val || 0)],
+      ["Znaků zpracováno", big(s.chars || 0) + (s.planned_chars ? " z " + big(s.planned_chars) : "")],
+    ];
+    $("kindTiles").innerHTML = tiles.map(([l, v]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v}</div></div>`).join("");
+    $("reportCard").classList.add("hidden");
+  } else {
+    $("vocabLabel").textContent = "Cílový slovník";
+    $("kindTiles").innerHTML = "";
   }
   const age = (Date.now() - new Date(s.updated_at).getTime()) / 1000;
   const stale = s.state === "running" && age > 30;
@@ -421,19 +656,24 @@ async function tick() {
   $("eta").textContent = s.state === "done" ? "hotovo" : s.state === "error" ? "–" : (s.eta_s != null ? "~" + dur(s.eta_s) : "počítám…");
   $("rate").textContent = s.rate ? big(s.rate.value) + " " + s.rate.unit : "–";
   $("mem").textContent = s.memory_gb != null ? s.memory_gb.toLocaleString("cs-CZ") + " GB" : "–";
-  $("vocab").textContent = s.vocab_target ? nf.format(s.vocab_target) : "–";
+  if (!isPrep) $("vocab").textContent = s.vocab_target ? nf.format(s.vocab_target) : "–";
   const b = $("banner");
   if (s.state === "error") { b.className = "banner error"; b.textContent = "✖ Úloha skončila chybou: " + (s.error || "?"); }
-  else if (s.state === "done" && s.result) {
+  else if (s.state === "done" && s.result && isPrep) {
+    const r = s.result;
+    b.className = "banner";
+    b.textContent = `✔ Hotovo za ${dur(r.total_seconds)} · train.bin ${nf.format(r.tokens_train)} tokenů (${(r.bytes_train / 1e6).toLocaleString("cs-CZ", { maximumFractionDigits: 1 })} MB) · ` +
+      `val.bin ${nf.format(r.tokens_val)} tokenů (${(r.bytes_val / 1e6).toLocaleString("cs-CZ", { maximumFractionDigits: 1 })} MB) · ${r.chars_per_token} znaků/token`;
+  } else if (s.state === "done" && s.result) {
     b.className = "banner";
     b.textContent = `✔ Hotovo za ${dur(s.result.total_seconds)} · slovník ${nf.format(s.result.vocab_size)} tokenů · ` +
       `${s.result.chars_per_token} znaků/token · uloženo do ${s.out}`;
   } else b.className = "banner hidden";
   drawPhases(s.phases || []);
   drawRate(s.rate_history || [], s.phases || []);
-  drawSources(s.sources || []);
+  drawSources(s.sources || [], s.kind);
   $("log").textContent = (s.log || []).join("\n") || "–";
-  loadReport(s);
+  if (!isPrep) loadReport(s);
 }
 tick();
 setInterval(tick, 2000);

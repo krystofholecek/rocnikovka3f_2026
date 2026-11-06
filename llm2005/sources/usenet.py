@@ -30,8 +30,11 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Iterator
 
+from ..datecheck import is_placeholder
 from ..document import Document
 from ._io import fetch
+
+USENET_START = "1980-01-01"  # dřívější datum v Usenetu nemůže být skutečné
 
 FILES_PAGE = "https://sourceforge.net/projects/utzoo/files/"
 RSS = "https://sourceforge.net/projects/utzoo/rss?path=/"
@@ -44,13 +47,22 @@ UUENCODE = re.compile(r"^begin [0-7]{3} \S+", re.M)
 
 
 def parse_date(value: str | None) -> str:
-    """'9 May 90 17:43:27 GMT' -> '1990-05-09'. Nejde-li přečíst -> ''."""
+    """'9 May 90 17:43:27 GMT' -> '1990-05-09'. Nejde-li přečíst -> ''.
+
+    Podezřelé datum -> '' (ingest ho pak odmítne jako no_date):
+    * 'Wed, 31-Dec-69 18:59:59 EDT' = unixový čas -1, news software datum neznal,
+    * cokoli před rokem 1980 – Usenet vznikl až 1979/80 (archiv UTZOO začíná 1981),
+      takže např. 1970-10-23 je počítač s nenastavenými hodinami.
+    """
     if not value:
         return ""
     try:
-        return parsedate_to_datetime(value).date().isoformat()
+        iso = parsedate_to_datetime(value).date().isoformat()
     except (TypeError, ValueError, IndexError, OverflowError):
         return ""
+    if is_placeholder(iso) or iso < USENET_START:
+        return ""
+    return iso
 
 
 def clean_body(body: str) -> str:

@@ -4,13 +4,14 @@
     python -m llm2005.tokenizer --max-chars 5000000 --out data/demo/tok.json   # rychlá zkouška
 
 Postup (fáze, které ukazuje živý přehled na http://localhost:8800):
-1. Vzorkování  – z databáze vybereme vyváženou směs (llm2005/mix.py) a uložíme ji
-                 do data/tokenizer-sample/ (jeden soubor JSONL na zdroj).
+1. Vzorkování  – z databáze vybereme vyváženou směs (llm2005/mix.py), každý text vyčistíme
+                 (llm2005/clean.py) a uložíme do data/tokenizer-sample/ (jeden JSONL na zdroj).
 2. Trénink 1/2 – knihovna `tokenizers` projde vzorek a spočítá, jak často je které „slovo“.
 3. Trénink 2/2 – z četností postupně skládá nejčastější dvojice do nových tokenů (BPE merges),
                  dokud slovník nemá 32 000 tokenů. Tahle část průběh nehlásí, ukazujeme odhad.
 4. Uložení     – data/tokenizer.json
 5. Kontrola    – data/progress/tokenizer-report.json (llm2005/tokenizer_report.py)
+                 a porovnání se starým tokenizérem data/progress/tokenizer-compare.json
 """
 from __future__ import annotations
 
@@ -25,8 +26,10 @@ from typing import Iterator
 
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 
-from .mix import DEFAULT_CONFIG, MixConfig, iter_mix, load_mix_config
+from .mix import DEFAULT_CONFIG, MixConfig, SourceCursor, iter_mix, load_mix_config
 from .progress import Progress
+
+CLEAN_VERSION = 1  # zvýšit při změně pravidel v llm2005/clean.py -> vzorek se vytvoří znovu
 
 EOT = "<|endoftext|>"  # oddělovač dokumentů
 
@@ -62,7 +65,15 @@ def make_trainer(vocab_size: int) -> trainers.BpeTrainer:
 # ---------------------------------------------------------------- 1) vzorek
 
 def _cfg_dict(cfg: MixConfig) -> dict:
-    return {"seed": cfg.seed, "max_chars": cfg.max_chars, "weights": cfg.weights, "whole": cfg.whole}
+    # "clean" = verze pravidel čištění; vzorek s jinou verzí (nebo bez čištění) se nepoužije znovu
+    return {"seed": cfg.seed, "max_chars": cfg.max_chars, "weights": cfg.weights, "whole": cfg.whole,
+            "clean": CLEAN_VERSION}
+
+
+def _cleaning_fields(c: SourceCursor) -> dict:
+    """Statistiky čištění jednoho zdroje pro přehled (kolik znaků zmizelo, kolik dokumentů vypadlo)."""
+    return {"raw_chars": c.raw_chars, "removed_chars": sum(c.removed.values()),
+            "dropped_docs": c.dropped_docs, "removed_by_rule": dict(c.removed)}
 
 
 def load_manifest(sample_dir: Path, cfg: MixConfig) -> dict | None:
@@ -81,6 +92,7 @@ def write_sample(db_path: str, cfg: MixConfig, sample_dir: Path, progress: Progr
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     files: dict = {}
     stats: dict[str, dict] = {}
+    cursors: dict[str, SourceCursor] = {}
     total = 0
     t_last = 0.0
 
@@ -93,7 +105,7 @@ def write_sample(db_path: str, cfg: MixConfig, sample_dir: Path, progress: Progr
         progress.log(f"Vzorkuji {source}: {cil} ({info['available_docs']:,} dokumentů v DB)")
 
     try:
-        for source, _doc_id, text in iter_mix(conn, cfg, on_plan):
+        for source, _doc_id, text in iter_mix(conn, cfg, on_plan, clean=True, cursors=cursors):
             if source not in files:
                 files[source] = open(sample_dir / f"{source}.jsonl", "w", encoding="utf-8")
             files[source].write(json.dumps(text, ensure_ascii=False) + "\n")
@@ -109,10 +121,15 @@ def write_sample(db_path: str, cfg: MixConfig, sample_dir: Path, progress: Progr
                 rate = progress.phase_rate()
                 left = max(0, cfg.max_chars - total)
                 progress.set_fraction(total / cfg.max_chars, eta_s=left / rate if rate else None)
+                for s, c in cursors.items():
+                    progress.source(s, **_cleaning_fields(c))
     finally:
         for f in files.values():
             f.close()
         conn.close()
+    for s, c in cursors.items():
+        progress.source(s, **_cleaning_fields(c))
+        stats.setdefault(s, {"docs": 0, "chars": 0})["cleaning"] = c.stats()
     manifest = {"config": _cfg_dict(cfg), "sources": stats, "total_chars": total,
                 "total_docs": sum(s["docs"] for s in stats.values()), "complete": True,
                 "created_at": time.strftime("%Y-%m-%d %H:%M:%S")}
@@ -203,8 +220,19 @@ def train_on_sample(sample_dir: Path, manifest: dict, vocab_size: int, progress:
 
 # ---------------------------------------------------------------- celé
 
+def _save_mix_cleaning(path: Path, manifest: dict) -> None:
+    """Statistiky čištění z celé směsi -> cleaning-report.json (část "mix_run")."""
+    from .clean_report import merge_into_report
+
+    per = {s: st["cleaning"] for s, st in manifest["sources"].items() if "cleaning" in st}
+    if per:
+        merge_into_report(path, "mix_run", {"created_at": manifest.get("created_at"),
+                                            "note": "celá směs pro tokenizér (po čištění)", "per_source": per})
+
+
 def train_mixed(db_path: str, cfg: MixConfig, vocab_size: int, out: Path, sample_dir: Path,
-                progress_dir: Path, resample: bool = False, eval_chars: int = 2_000_000) -> dict:
+                progress_dir: Path, resample: bool = False, eval_chars: int = 2_000_000,
+                compare_with: Path | None = None) -> dict:
     from .tokenizer_report import build_report, print_report
 
     progress = Progress(progress_dir / "tokenizer-status.json", "Trénink BPE tokenizéru", PHASES).start()
@@ -220,6 +248,10 @@ def train_mixed(db_path: str, cfg: MixConfig, vocab_size: int, out: Path, sample
             for s, st in manifest["sources"].items():
                 progress.source(s, target_chars=st.get("target_chars"), sampled_chars=st["chars"],
                                 sampled_docs=st["docs"])
+                c = st.get("cleaning")
+                if c:
+                    progress.source(s, raw_chars=c["raw_chars"], removed_chars=sum(c["removed"].values()),
+                                    dropped_docs=c["dropped_docs"], removed_by_rule=c["removed"])
         else:
             progress.phase("sampling")
             manifest = write_sample(db_path, cfg, sample_dir, progress)
@@ -227,6 +259,7 @@ def train_mixed(db_path: str, cfg: MixConfig, vocab_size: int, out: Path, sample
         for s, st in manifest["sources"].items():
             share = 100 * st["chars"] / max(1, manifest["total_chars"])
             progress.source(s, share_percent=round(share, 2))
+        _save_mix_cleaning(progress_dir / "cleaning-report.json", manifest)
 
         tok = train_on_sample(sample_dir, manifest, vocab_size, progress)
         train_s = time.time() - t0
@@ -247,6 +280,15 @@ def train_mixed(db_path: str, cfg: MixConfig, vocab_size: int, out: Path, sample
                                     "chars_per_token": report["chars_per_token"]["mix_weighted"],
                                     "total_seconds": round(time.time() - t0)}
         print_report(report)
+        if compare_with and compare_with.exists() and compare_with.resolve() != out.resolve():
+            from .tokenizer_compare import compare, print_compare
+            progress.log(f"Porovnávám se starým tokenizérem {compare_with}")
+            cmp = compare(Tokenizer.from_file(str(compare_with)), tok, sample_dir,
+                          [s for s, st in manifest["sources"].items() if st["docs"] > 0])
+            (progress_dir / "tokenizer-compare.json").write_text(
+                json.dumps(cmp, ensure_ascii=False, indent=1), encoding="utf-8")
+            progress.extra["compare"] = "tokenizer-compare.json"
+            print_compare(cmp)
         progress.log(f"Hotovo za {(time.time() - t0) / 60:.1f} min")
         progress.finish("done")
         return report
@@ -267,12 +309,15 @@ def main() -> None:
     p.add_argument("--progress-dir", default="data/progress")
     p.add_argument("--resample", action="store_true", help="vytvořit vzorek znovu, i když existuje")
     p.add_argument("--eval-chars", type=int, default=2_000_000, help="kolik znaků na zdroj pro kontrolu")
+    p.add_argument("--compare-with", default="data/tokenizer-v1.json",
+                   help="starý tokenizér pro porovnání (když existuje)")
     a = p.parse_args()
     cfg = load_mix_config(a.mix)
     if a.max_chars:
         cfg.max_chars = a.max_chars
     train_mixed(a.db, cfg, a.vocab, Path(a.out), Path(a.sample_dir), Path(a.progress_dir),
-                resample=a.resample, eval_chars=a.eval_chars)
+                resample=a.resample, eval_chars=a.eval_chars,
+                compare_with=Path(a.compare_with) if a.compare_with else None)
 
 
 if __name__ == "__main__":

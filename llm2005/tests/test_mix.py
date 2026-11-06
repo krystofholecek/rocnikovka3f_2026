@@ -103,6 +103,41 @@ def test_train_mixed_writes_tokenizer_status_and_report(tmp_path):
     assert status["phases"][0]["state"] == "skipped"
 
 
+def test_mix_clean_skips_short_and_counts_cleaned(tmp_path):
+    db = Database(tmp_path / "c.sqlite")
+    noise = "\n".join("M" + "8" * 60 for _ in range(20))  # uuencode -> po čištění skoro nic
+    db.add(Document(source="usenet", source_id="bin", title=None, date="1990-01-01", url=None, text="hi\n" + noise))
+    db.add(Document(source="usenet", source_id="ok", title=None, date="1990-01-01", url=None,
+                    text="real text " * 40 + "-" * 50))
+    db.commit()
+    db.close()
+    conn = sqlite3.connect(tmp_path / "c.sqlite")
+    cursors: dict = {}
+    out = list(iter_mix(conn, MixConfig(seed=1, max_chars=10_000, weights={"usenet": 1}), clean=True, cursors=cursors))
+    assert [t for _, _, t in out] == ["real text " * 40 + "-" * 8]
+    st = cursors["usenet"].stats()
+    assert st["dropped_docs"] == 1 and st["removed"]["uuencode"] > 1000 and st["removed"]["repeats"] == 42
+
+
+def test_prepare_from_sample_and_db(tmp_path):
+    import numpy as np
+    from llm2005.prepare import prepare
+
+    db = make_db(tmp_path / "p.sqlite", {"usenet": 300, "blogs": 300}, doc_len=400)
+    cfg = MixConfig(seed=2005, max_chars=100_000, weights={"usenet": 1, "blogs": 1})
+    prog = tmp_path / "progress"
+    train_mixed(db, cfg, 400, tmp_path / "tok.json", tmp_path / "sample", prog, eval_chars=5_000)
+    a = prepare(db, cfg, str(tmp_path / "tok.json"), tmp_path / "a", tmp_path / "sample", prog, val_fraction=0.05)
+    b = prepare(db, cfg, str(tmp_path / "tok.json"), tmp_path / "b", tmp_path / "no-sample", prog, val_fraction=0.05)
+    for r in (a, b):
+        assert r["tokens_val"] > 0 and r["tokens_train"] > 10 * r["tokens_val"]
+    # vzorek i výběr z databáze dají stejnou směs -> stejné tokeny
+    assert (np.fromfile(tmp_path / "a" / "train.bin", dtype=np.uint16) ==
+            np.fromfile(tmp_path / "b" / "train.bin", dtype=np.uint16)).all()
+    status = json.loads((prog / "prepare-status.json").read_text(encoding="utf-8"))
+    assert status["state"] == "done" and status["kind"] == "prepare" and status["result"]["tokens_train"] == b["tokens_train"]
+
+
 def test_progress_server_is_local_and_read_only(tmp_path):
     from llm2005.progress_server import make_server
 

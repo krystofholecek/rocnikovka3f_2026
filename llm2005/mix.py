@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterator
 
+from .clean import clean_text, is_long_enough
+
 DEFAULT_CONFIG = "configs/mix.json"
 FETCH_BATCH = 256  # kolik dokumentů načteme z databáze najednou
 
@@ -76,18 +78,32 @@ def shuffled_ids(conn: sqlite3.Connection, source: str, seed: int) -> list[int]:
 
 
 class SourceCursor:
-    """Prochází jeden zdroj v zamíchaném pořadí a bere celé dokumenty."""
+    """Prochází jeden zdroj v zamíchaném pořadí a bere celé dokumenty.
 
-    def __init__(self, conn: sqlite3.Connection, source: str, seed: int):
+    S clean=True každý text projde clean_text (llm2005/clean.py) a do podílu se počítají
+    znaky PO vyčištění. Dokument kratší než MIN_CHARS po vyčištění se přeskočí.
+    """
+
+    def __init__(self, conn: sqlite3.Connection, source: str, seed: int, clean: bool = False):
         self.conn, self.source = conn, source
         self.ids = shuffled_ids(conn, source, seed)
+        self.clean = clean
         self.pos = 0
-        self.chars = 0
+        self.chars = 0          # znaky vybraných dokumentů (po vyčištění)
         self.docs = 0
+        self.raw_chars = 0      # znaky před čištěním (všech prošlých dokumentů)
+        self.dropped_docs = 0   # po vyčištění moc krátké -> přeskočeny
+        self.dropped_chars = 0  # jejich původní délka
+        self.removed: dict[str, int] = {}  # kolik znaků odstranilo které pravidlo
 
     @property
     def exhausted(self) -> bool:
         return self.pos >= len(self.ids)
+
+    def stats(self) -> dict:
+        return {"docs": self.docs, "chars": self.chars, "raw_chars": self.raw_chars,
+                "dropped_docs": self.dropped_docs, "dropped_chars": self.dropped_chars,
+                "removed": dict(self.removed)}
 
     def take(self, quota: float) -> Iterator[tuple[int, str]]:
         """Vrací (id, text) dalších dokumentů, dokud nemáme `quota` znaků (nebo dojdou)."""
@@ -102,6 +118,14 @@ class SourceCursor:
                 text = texts.get(doc_id, "")
                 if not text:
                     continue
+                self.raw_chars += len(text)
+                if self.clean:
+                    raw_len = len(text)
+                    text = clean_text(text, self.source, self.removed)
+                    if not is_long_enough(text):
+                        self.dropped_docs += 1
+                        self.dropped_chars += raw_len
+                        continue
                 self.chars += len(text)
                 self.docs += 1
                 yield doc_id, text
@@ -111,17 +135,23 @@ def iter_mix(
     conn: sqlite3.Connection,
     cfg: MixConfig,
     on_plan: Callable[[str, dict], None] | None = None,
+    clean: bool = False,
+    cursors: dict[str, SourceCursor] | None = None,
 ) -> Iterator[tuple[str, int, str]]:
     """Projde směs a vrací (zdroj, id, text). Deterministické díky seedu.
 
     on_plan(zdroj, info) se zavolá vždy, když zdroj dostane (nový) cíl ve znacích.
+    clean=True: texty projdou clean_text a krátké se přeskočí (viz SourceCursor).
+    cursors: když předáš prázdný slovník, naplní se kurzory zdrojů – z nich jdou
+    po skončení přečíst statistiky čištění (cursor.stats()).
     """
     present = {r[0] for r in conn.execute("SELECT DISTINCT source FROM documents")}
-    cursors: dict[str, SourceCursor] = {}
+    if cursors is None:
+        cursors = {}
 
     def cursor(source: str) -> SourceCursor:
         if source not in cursors:
-            cursors[source] = SourceCursor(conn, source, cfg.seed)
+            cursors[source] = SourceCursor(conn, source, cfg.seed, clean=clean)
         return cursors[source]
 
     # 1) malé zdroje celé

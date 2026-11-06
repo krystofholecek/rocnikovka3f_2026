@@ -62,11 +62,15 @@ def main() -> None:
     p.add_argument("--config", required=True)
     p.add_argument("--hours", type=float, default=None, help="po kolika hodinách skončit")
     p.add_argument("--data-dir", default="data")
+    p.add_argument("--max-steps", type=int, default=None, help="přepíše max_steps z konfigurace")
+    p.add_argument("--out-dir", default=None, help="kam ukládat checkpoint (jinak checkpoints/<name>)")
     a = p.parse_args()
 
     cfg = load_config(a.config)
     t = cfg["train"]
-    out = Path(cfg.get("out_dir", "checkpoints")) / cfg["name"]
+    if a.max_steps:
+        t["max_steps"] = a.max_steps
+    out = Path(a.out_dir) if a.out_dir else Path(cfg.get("out_dir", "checkpoints")) / cfg["name"]
     out.mkdir(parents=True, exist_ok=True)
     ckpt_path = out / "ckpt.pt"
     device = pick_device()

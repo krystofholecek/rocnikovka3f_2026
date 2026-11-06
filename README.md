@@ -122,6 +122,29 @@ Zkušební běh na 150 mil. znaků (32 000 tokenů) trval ~1 min a dal ~4,0 znak
 dlouhé řady mezer, pomlček a `=` (formátování e-mailů a Usenetu) – zabírají jen pár desítek míst ve slovníku,
 ale je to kandidát na pozdější úklid dat.
 
+### Čištění dat (za běhu, databáze se nemění)
+
+První tokenizér na celé směsi (3 mld. znaků) měl 214 tokenů jen z mezer (až 512 mezer) a 289 tokenů z opakovaného
+znaku (`-----`, `====`, `AAAA…` = binární přílohy). Proto text při výběru směsi (tokenizér i `prepare`) projde
+`llm2005/clean.py`:
+
+- binární přílohy (uuencode, base64/MIME, BinHex) se **odstraní úplně, bez značky** – značka typu
+  „[příloha odstraněna]“ v textech z roku 2005 nikdy nebyla a model by ji jen napodoboval,
+- odsazení max 16 znaků, uvnitř řádku max 4 mezery/tabulátory, mezery na konci řádku pryč,
+- stejný znak max 8× za sebou (písmeno/číslice 16×), max 2 prázdné řádky, řídicí znaky pryč,
+- dokument kratší než 200 znaků po vyčištění se do směsi nebere.
+
+Analýza na vzorku: `python -m llm2005.clean_report` -> `data/progress/cleaning-report.json` (vidět v přehledu).
+Nejvíc šumu má Enron (~9 % znaků, hlavně base64 přílohy) a Usenet (~3 %); Wikipedie, blogy a knihy pod 0,6 %.
+
+Podezřelá data: 518 dokumentů mělo v hlavičce „nulové“ datum – Usenet `Wed, 31-Dec-69 18:59:59 EDT`
+(unixový čas −1) a pár let 1970 (před vznikem Usenetu), Enron `Mon, 31 Dec 1979 16:00:00 -0800` (nula Outlooku).
+Parsery je teď berou jako `no_date`; staré záznamy přesunul `python -m llm2005.fix_dates --apply` do `rejected`
+s důvodem `suspicious_date`.
+
+Celý řetězec po čištění (tokenizér -> porovnání s `data/tokenizer-v1.json` -> `prepare` -> krátký test `tiny`):
+`python -m llm2005.rebuild_data`.
+
 ## Model
 
 | Konfigurace | Parametrů | K čemu |

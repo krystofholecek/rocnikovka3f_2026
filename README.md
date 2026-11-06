@@ -104,7 +104,14 @@ llm2005/          model a celý řetězec zpracování dat
 configs/          velikosti modelu a nastavení tréninku
 config/ core/ templates/ static/   kostra webového chatu (Django)
 data/, checkpoints/                data a natrénované modely (nejsou v gitu, jsou velké)
+web/tokenizer-lab/                 samostatný doprovodný web (viz níže)
 ```
+
+### Doprovodný web: Tokenizer Lab
+
+Složka [`web/tokenizer-lab/`](web/tokenizer-lab/README.md) je **samostatný projekt** – statický web v JavaScriptu,
+který v prohlížeči ukazuje, jak náš BPE tokenizér skládá tokeny (trénink krok za krokem, barevné tokeny, pipeline
+`prepare`). S hlavním projektem nesdílí kód, má vlastní README a testy a hlavní projekt na něm nezávisí.
 
 ## Plán
 

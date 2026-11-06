@@ -14,6 +14,7 @@ Import:
 
 Pravidla data:
 * datum = `date_filed` případu (clusteru), ke kterému rozhodnutí patří,
+* chybějící nebo nečitelné datum -> bez data -> no_date,
 * odhadnuté datum (date_filed_is_approximate = t) -> bez data -> no_date,
 * po 31. 12. 2005 -> too_new,
 * rozhodnutí před rokem MIN_YEAR (1980) vynecháváme úplně – chceme moderní jazyk,
@@ -26,6 +27,7 @@ import csv
 import html
 import io
 import re
+import sys
 import urllib.request
 from pathlib import Path
 from typing import Iterator
@@ -44,21 +46,93 @@ MIN_YEAR = 1980
 TEXT_COLUMNS = ("plain_text", "html_with_citations", "html", "html_lawbox",
                 "html_columbia", "html_anon_2020", "xml_harvard")
 
-csv.field_size_limit(2**31 - 1)  # texty rozhodnutí jsou delší než výchozí limit
+DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _raise_field_limit() -> None:
+    """Texty rozhodnutí jsou delší než výchozí limit modulu csv (128 kB) -> co nejvýš."""
+    limit = sys.maxsize
+    while True:
+        try:
+            csv.field_size_limit(limit)
+            return
+        except OverflowError:  # na Windows je limit jen 32bitový C long
+            limit //= 2
+
+
+_raise_field_limit()
+
+
+class CourtListenerDialect(csv.Dialect):
+    """Formát bulk dumpů CourtListener (PostgreSQL COPY ... CSV, ESCAPE '\\').
+
+    Každé pole je v uvozovkách, uvozovka UVNITŘ pole se píše jako \\" (ne "" jako
+    v Excelu) a zpětné lomítko jako \\\\. Pole může obsahovat i konce řádků.
+    S výchozím dialektem se \\" špatně přečte a sloupce se posunou.
+    """
+    delimiter = ","
+    quotechar = '"'
+    escapechar = "\\"
+    doublequote = False
+    quoting = csv.QUOTE_MINIMAL
+    lineterminator = "\n"
+    skipinitialspace = False
+    strict = False
+
+
+class RowStats:
+    """Počítadlo přečtených a vadných (přeskočených) řádků CSV."""
+
+    def __init__(self) -> None:
+        self.rows = 0
+        self.bad = 0
+
+    def __str__(self) -> str:
+        return f"{self.rows:,} řádků, vadných přeskočeno {self.bad:,}"
 
 
 def _open_csv(path: Path):
-    """Proudové čtení .csv.bz2 (i useknutého) jako slovníků podle hlavičky."""
+    """Proudové čtení .csv.bz2 (i useknutého) jako slovníků podle hlavičky.
+
+    newline="" je nutné, aby modul csv sám poznal konce řádků uvnitř polí.
+    """
     text = io.TextIOWrapper(bz2.open(path, "rb"), encoding="utf-8", errors="replace", newline="")
-    return csv.DictReader(text)
+    return csv.DictReader(text, dialect=CourtListenerDialect)
 
 
-def _rows(reader) -> Iterator[dict]:
-    """Řádky CSV; useknutý konec archivu (EOFError) nebo rozbitý řádek čtení ukončí."""
+def _rows(reader: csv.DictReader, stats: RowStats | None = None) -> Iterator[dict]:
+    """Řádky CSV. Vadný řádek přeskočí a započítá, useknutý konec archivu čtení ukončí.
+
+    Řádek je vadný, když ho csv nepřečte (csv.Error) nebo nemá stejný počet
+    sloupců jako hlavička (DictReader pak dá klíč None nebo hodnotu None).
+    """
+    stats = stats if stats is not None else RowStats()
+    while True:
+        try:
+            row = next(reader)
+        except StopIteration:
+            return
+        except csv.Error as e:  # rozbitý řádek -> přeskočit, číst dál
+            stats.bad += 1
+            if stats.bad <= 10:
+                print(f"vadný řádek CSV přeskočen ({e})", flush=True)
+            continue
+        except (EOFError, OSError) as e:  # useknutý archiv -> konec
+            print(f"konec čtení CSV ({type(e).__name__}: {e})", flush=True)
+            return
+        stats.rows += 1
+        if None in row or None in row.values():
+            stats.bad += 1
+            continue
+        yield row
+
+
+def _int(value: str | None) -> int | None:
+    """Číslo z textu, nebo None, když to číslo není (vadný řádek)."""
     try:
-        yield from reader
-    except (EOFError, OSError, csv.Error) as e:
-        print(f"konec čtení CSV ({type(e).__name__}: {e})", flush=True)
+        return int((value or "").strip())
+    except ValueError:
+        return None
 
 
 def html_to_text(t: str) -> str:
@@ -79,47 +153,65 @@ def opinion_text(row: dict) -> str:
     return ""
 
 
-def load_clusters(path: Path) -> dict[int, str]:
-    """cluster id -> "datum<TAB>název případu" (jen od MIN_YEAR; odhadnuté datum -> "")."""
+def load_clusters(path: Path, stats: RowStats | None = None) -> dict[int, str]:
+    """cluster id -> "datum<TAB>název případu".
+
+    * případ před rokem MIN_YEAR -> vůbec se neuloží (rozhodnutí se pak vynechá),
+    * chybějící, nečitelné nebo odhadnuté datum -> "" (rozhodnutí půjde do rejected
+      jako no_date),
+    * po CUTOFF -> jen datum (rozhodnutí půjde do rejected jako too_new).
+    Řádek bez platného číselného id je vadný -> přeskočí se a započítá do stats.bad.
+    """
+    stats = stats if stats is not None else RowStats()
     clusters: dict[int, str] = {}
     min_date = f"{MIN_YEAR}-01-01"
-    for i, row in enumerate(_rows(_open_csv(path)), 1):
-        d = (row.get("date_filed") or "").strip()
-        if d < min_date:
+    for row in _rows(_open_csv(path), stats):
+        cid = _int(row.get("id"))
+        if cid is None:
+            stats.bad += 1
             continue
-        if row.get("date_filed_is_approximate") == "t":
-            clusters[int(row["id"])] = ""
+        d = (row.get("date_filed") or "").strip()
+        if not DATE_RE.fullmatch(d):
+            clusters[cid] = ""  # chybějící/nečitelné datum -> odmítne se (no_date)
+        elif d < min_date:
+            continue  # starý případ -> nebereme vůbec
+        elif row.get("date_filed_is_approximate") == "t":
+            clusters[cid] = ""  # odhadnuté datum -> odmítne se (no_date)
         elif d <= CUTOFF.isoformat():
             name = " ".join((row.get("case_name") or "").split())[:200]
-            clusters[int(row["id"])] = f"{d}\t{name}"
+            clusters[cid] = f"{d}\t{name}"
         else:
-            clusters[int(row["id"])] = d  # pozdější -> stačí datum (odmítne se)
-        if i % 1_000_000 == 0:
-            print(f"clustery: {i:,} řádků, vybráno {len(clusters):,}", flush=True)
+            clusters[cid] = d  # pozdější -> stačí datum (odmítne se)
+        if stats.rows % 1_000_000 == 0:
+            print(f"clustery: {stats}, vybráno {len(clusters):,}", flush=True)
     return clusters
 
 
 def read_courtlistener(path: str) -> Iterator[Document]:
     folder = Path(path)
-    clusters = load_clusters(folder / CLUSTERS)
-    print(f"clustery načteny: {len(clusters):,}", flush=True)
-    for row in _rows(_open_csv(folder / OPINIONS)):
-        try:
-            info = clusters.get(int(row.get("cluster_id") or 0))
-        except ValueError:
+    cstats = RowStats()
+    clusters = load_clusters(folder / CLUSTERS, cstats)
+    print(f"clustery načteny: {len(clusters):,} ({cstats})", flush=True)
+    ostats = RowStats()
+    for row in _rows(_open_csv(folder / OPINIONS), ostats):
+        oid, cid = _int(row.get("id")), _int(row.get("cluster_id"))
+        if oid is None or cid is None:
+            ostats.bad += 1
             continue
+        info = clusters.get(cid)
         if info is None:
             continue  # případ před rokem MIN_YEAR nebo neznámý -> nebereme
         date, _, title = info.partition("\t")
         allowed = bool(date) and date <= CUTOFF.isoformat()
         yield Document(
             source="courtlistener",
-            source_id=row["id"],
+            source_id=str(oid),
             title=title,
             date=date,
             text=opinion_text(row) if allowed else "",
-            url=f"https://www.courtlistener.com/opinion/{row['cluster_id']}/x/",
+            url=f"https://www.courtlistener.com/opinion/{cid}/x/",
         )
+    print(f"rozhodnutí: {ostats}", flush=True)
 
 
 def fetch_prefix(url: str, target: Path, max_bytes: int, chunk: int = 1 << 20) -> int:

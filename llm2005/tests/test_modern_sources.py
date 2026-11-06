@@ -188,7 +188,7 @@ def test_usenet_truncated_tape(tmp_path):
 
 def _write_csv_bz2(path, header, rows, cut=0):
     buf = io.StringIO()
-    w = csv.writer(buf, lineterminator="\n")
+    w = csv.writer(buf, dialect=courtlistener.CourtListenerDialect, quoting=csv.QUOTE_ALL)
     w.writerow(header)
     w.writerows(rows)
     data = bz2.compress(buf.getvalue().encode("utf-8"), compresslevel=1)  # bloky po 100 kB
@@ -227,6 +227,56 @@ def test_courtlistener_read_and_ingest(tmp_path):
     db = Database(tmp_path / "t.sqlite")
     counts = ingest(courtlistener.read_courtlistener(str(tmp_path)), db)
     assert counts == {"added": 1, "too_new": 1, "no_date": 1, "too_short": 0, "duplicate": 0}
+
+
+# Ukázka ve skutečném formátu dumpu: vše v uvozovkách, uvozovka uvnitř pole = \",
+# zpětné lomítko = \\, prázdné NULL pole bez uvozovek a víceřádková pole.
+CLUSTERS_RAW = r'''id,date_filed,date_filed_is_approximate,case_name,headmatter,syllabus
+"1","1995-03-04","f","Smith v. \"Big\" Jones","<docketnumber data-order=\"0\">
+    [Civ. No. 546.
+   </docketnumber>","line one
+line two, with comma"
+"2","2003-07-07","f","Back\\slash v. Case",,"x"
+"3","","f","No Date v. Case","",""
+"oops, not a number","2001-01-01","f","Broken v. Row","",""
+"4","2004-02-02","f","Short Row"
+"5","2010-01-01","f","Later v. Case","\"quoted\"
+multi","\\"
+'''
+
+OPINIONS_RAW = r'''id,cluster_id,plain_text
+"10","1","The court said \"no\".
+''' + LONG + r'''
+Second paragraph."
+"11","2","''' + LONG + r'''"
+"12","3","''' + LONG + r'''"
+"13","5","''' + LONG + r'''"
+"14","x","''' + LONG + r'''"
+'''
+
+
+def test_courtlistener_postgres_csv_format(tmp_path):
+    (tmp_path / courtlistener.CLUSTERS).write_bytes(bz2.compress(CLUSTERS_RAW.encode()))
+    (tmp_path / courtlistener.OPINIONS).write_bytes(bz2.compress(OPINIONS_RAW.encode()))
+
+    stats = courtlistener.RowStats()
+    clusters = courtlistener.load_clusters(tmp_path / courtlistener.CLUSTERS, stats)
+    assert clusters == {
+        1: '1995-03-04\tSmith v. "Big" Jones',  # víceřádková pole a \" nerozbijí sloupce
+        2: "2003-07-07\tBack\\slash v. Case",
+        3: "",                                    # bez data -> no_date
+        5: "2010-01-01",                          # po 2005 -> too_new
+    }
+    assert stats.rows == 6 and stats.bad == 2     # nečíselné id + krátký řádek
+
+    docs = list(courtlistener.read_courtlistener(str(tmp_path)))
+    assert [d.source_id for d in docs] == ["10", "11", "12", "13"]  # "x" přeskočeno
+    assert docs[0].text.startswith('The court said "no".\n')
+    assert docs[0].text.endswith("\nSecond paragraph.")
+
+    db = Database(tmp_path / "t.sqlite")
+    counts = ingest(courtlistener.read_courtlistener(str(tmp_path)), db)
+    assert counts == {"added": 2, "too_new": 1, "no_date": 1, "too_short": 0, "duplicate": 0}
 
 
 def test_courtlistener_truncated_opinions(tmp_path):

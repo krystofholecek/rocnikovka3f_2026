@@ -50,7 +50,7 @@ flowchart LR
 |---|---|---|
 | 1. Zdroj → kontrola data → databáze | `python -m llm2005.ingest wikipedia <soubor>` | `data/llm2005.sqlite` |
 | 2. Přehled databáze | `python -m llm2005.ingest stats` | počty dokumentů a znaků podle zdroje |
-| 3. Vlastní tokenizer | `python -m llm2005.tokenizer` | `data/tokenizer.json` |
+| 3. Vlastní tokenizer (vyvážená směs, živý přehled) | `python -m llm2005.tokenizer` | `data/tokenizer.json`, report v `data/progress/` |
 | 4. Převod na tokeny | `python -m llm2005.prepare` | `data/train.bin`, `data/val.bin` |
 | 5. Trénink | `python -m llm2005.train --config configs/small.json --hours 8` | `checkpoints/small/` |
 | 6. Vyzkoušet model | `python -m llm2005.sample --config configs/small.json --prompt "The Internet is"` | vygenerovaný text |
@@ -66,6 +66,50 @@ Trénink se průběžně ukládá. Když ho spustíš znovu, pokračuje tam, kde
 | Usenet | plán | datum příspěvku |
 
 Cíl milníku Data: **≥ 1 mld. tokenů**. Jiný zdroj stačí převést na JSON Lines (`source`, `source_id`, `date`, `text`) a nahrát přes `python -m llm2005.ingest jsonl soubor.jsonl`.
+
+## Vyvážení dat (směs pro tokenizér)
+
+Chceme, aby model „mluvil“ přirozeně jako text z let ~1995–2005: e-maily, blogy, diskuze, encyklopedie.
+V databázi ale převažují knihy z 19. století (PG-19, ~11,5 mld. znaků) a soudní rozhodnutí (CourtListener).
+Kdybychom vzali všechno, tokenizér by si slovník „utratil“ za staré a právnické obraty.
+Proto bereme z každého zdroje jen podíl **podle počtu znaků** ([`configs/mix.json`](configs/mix.json), kód [`llm2005/mix.py`](llm2005/mix.py)):
+
+| Zdroj | Podíl | Proč |
+|---|---|---|
+| usenet | 25 % | hovorová angličtina, diskuze 80.–90. let |
+| wikipedia | 25 % | spisovný, věcný jazyk, široký záběr témat |
+| blogs | 15 % | osobní psaní 1999–2005, slang, internetová kultura |
+| pg19 (knihy) | 10 % | bohatá slovní zásoba, ale starý styl → jen menšina |
+| wikipedia-talk | 8 % | diskuze o článcích 2002–2005 |
+| enron | 7 % | firemní e-maily 1999–2002 |
+| courtlistener | 7 % | právnický jazyk – užitečný, ale nechceme, aby převládl |
+| arxiv, wikinews, wikibooks, wikiquote, wikisource | celé | malé zdroje (dohromady ~35 mil. znaků, ~1 %) |
+
+Pravidla: malé zdroje celé, zbytek rozpočtu (max. **3 mld. znaků**) podle vah. Dokumenty každého zdroje se
+zamíchají pevným seedem **2005** a berou se **celé** dokumenty, dokud zdroj nemá svůj podíl – výsledek je pokaždé stejný.
+Když zdroj nemá dost textu, vezme se celý a chybějící část se poměrně rozdělí mezi ostatní (podle dat z listopadu 2026
+mají všechny vážené zdroje textu dost). Plán bez čtení textů: `python -m llm2005.mix`.
+
+### Trénink tokenizéru a živý přehled
+
+```bash
+python -m llm2005.progress_server      # přehled na http://localhost:8800 (jen tento počítač, jen čtení)
+python -m llm2005.tokenizer            # vzorek -> trénink -> uložení -> kontrola
+```
+
+- Vzorek se uloží do `data/tokenizer-sample/` (JSONL podle zdroje); další běh se stejným nastavením ho použije znovu
+  (`--resample` vynutí nový).
+- Každé ~2 s se zapisuje `data/progress/tokenizer-status.json` (fáze, procenta, rychlost, ETA, zdroje, log)
+  a stránka [`tools/progress/index.html`](tools/progress/index.html) ho zobrazuje (světlý/tmavý režim, i na tabletu).
+- Při „skládání tokenů“ (BPE merges) knihovna `tokenizers` průběh nehlásí – procenta a ETA té fáze jsou **odhad**.
+- Po tréninku vznikne `data/progress/tokenizer-report.json` (`python -m llm2005.tokenizer_report` ho vytvoří znovu):
+  velikost slovníku, 30 nejdelších tokenů, rozdělení 5 ukázkových vět z roku 2005, znaků na token celkem i podle zdroje,
+  podíl bajtových tokenů.
+- Server lze pustit i dvojklikem na `tools/progress/start-server.bat`.
+
+Zkušební běh na 150 mil. znaků (32 000 tokenů) trval ~1 min a dal ~4,0 znaku na token. Nejdelší tokeny byly
+dlouhé řady mezer, pomlček a `=` (formátování e-mailů a Usenetu) – zabírají jen pár desítek míst ve slovníku,
+ale je to kandidát na pozdější úklid dat.
 
 ## Model
 
@@ -98,12 +142,15 @@ llm2005/          model a celý řetězec zpracování dat
 ├── sources/      čtení zdrojů (Wikipedie, JSONL); nový zdroj = nový soubor
 ├── datecheck.py  kontrola data (hranice 31. 12. 2005)
 ├── db.py         databáze dokumentů (SQLite)
-├── tokenizer.py, prepare.py   tokenizer a převod na tokeny
+├── mix.py        vyvážená směs zdrojů (configs/mix.json)
+├── tokenizer.py, tokenizer_report.py, prepare.py   tokenizer, jeho kontrola a převod na tokeny
+├── progress.py, progress_server.py   živý přehled průběhu (http://localhost:8800)
 ├── model.py, train.py, sample.py, benchmark.py   GPT, trénink, generování, měření rychlosti
 └── tests/        testy
 configs/          velikosti modelu a nastavení tréninku
 config/ core/ templates/ static/   kostra webového chatu (Django)
 data/, checkpoints/                data a natrénované modely (nejsou v gitu, jsou velké)
+tools/progress/                    stránka živého přehledu (jeden HTML soubor)
 web/tokenizer-lab/                 samostatný doprovodný web (viz níže)
 ```
 

@@ -1,0 +1,15 @@
+{
+  "_popis": "Vyvážená směs zdrojů pro tokenizér (a později trénink). Podíly jsou podle počtu ZNAKŮ. Zdůvodnění v README (sekce Vyvážení dat).",
+  "seed": 2005,
+  "max_chars": 3000000000,
+  "weights": {
+    "usenet": 25,
+    "wikipedia": 25,
+    "blogs": 15,
+    "pg19": 10,
+    "wikipedia-talk": 8,
+    "enron": 7,
+    "courtlistener": 7
+  },
+  "whole": ["arxiv", "wikinews", "wikibooks", "wikiquote", "wikisource"]
+}

@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM 2005 – průběh tréninku tokenizéru</title>
+<!--
+  Živý přehled průběhu. Bez externích knihoven, jen tento soubor.
+  Každé 2 s načte /progress/tokenizer-status.json (a report, když je hotový).
+  Server: python -m llm2005.progress_server  ->  http://localhost:8800
+-->
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --surface-2: #f0efec;
+  --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+  --s1: #2a78d6; --s2: #eb6834;
+  --good: #0ca30c; --critical: #d03b3b;
+  --tok-a: #e3edf9; --tok-b: #fbe6dc;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --surface-2: #262624;
+    --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+    --s1: #3987e5; --s2: #d95926; --tok-a: #1f3550; --tok-b: #4a2a1c;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --surface-2: #262624;
+  --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+  --s1: #3987e5; --s2: #d95926; --tok-a: #1f3550; --tok-b: #4a2a1c;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink);
+  font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid var(--border); background: var(--surface); position: sticky; top: 0; z-index: 5; }
+h1 { font-size: 1.25rem; margin: 0; }
+h2 { font-size: 1.05rem; margin: 0 0 12px; }
+.sub { color: var(--ink-2); font-size: .9rem; font-weight: 400; }
+main { max-width: 1200px; margin: 0 auto; padding: 20px; display: grid; gap: 16px; grid-template-columns: repeat(12, 1fr); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; grid-column: span 12; min-width: 0; }
+@media (min-width: 900px) { .half { grid-column: span 6; } }
+button { font: inherit; color: var(--ink); background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 14px; cursor: pointer; min-height: 40px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--surface-2); font-size: .9rem; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.big { font-size: 2.4rem; font-weight: 650; line-height: 1.1; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 14px; }
+.tile .label { color: var(--ink-2); font-size: .85rem; }
+.tile .value { font-size: 1.35rem; font-weight: 600; }
+.bar { height: 18px; background: var(--surface-2); border-radius: 9px; overflow: hidden; margin-top: 10px; }
+.bar > div { height: 100%; background: var(--s1); border-radius: 9px; transition: width .6s ease; }
+.phases { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.phases li { display: grid; grid-template-columns: 28px 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 8px; }
+.phases li.running { background: var(--surface-2); }
+.phases .icon { font-size: 1.1rem; text-align: center; }
+.phases .meta { color: var(--ink-2); font-size: .85rem; text-align: right; font-variant-numeric: tabular-nums; }
+.phases .note { color: var(--ink-2); font-size: .82rem; }
+.minibar { height: 6px; background: var(--grid); border-radius: 3px; margin-top: 4px; overflow: hidden; }
+.minibar > div { height: 100%; background: var(--s1); border-radius: 3px; }
+.state-done .icon, .state-skipped .icon { color: var(--good); }
+.state-error .icon { color: var(--critical); }
+.state-pending { color: var(--muted); }
+svg { display: block; width: 100%; height: auto; overflow: visible; }
+svg text { fill: var(--muted); font-size: 12px; font-family: inherit; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; color: var(--ink-2); font-size: .88rem; margin-bottom: 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 14px; height: 10px; border-radius: 2px; display: inline-block; }
+.sw.outline { border: 1.5px dashed var(--ink-2); }
+pre.log { margin: 0; background: var(--surface-2); border-radius: 8px; padding: 12px; font-size: .82rem;
+  white-space: pre-wrap; word-break: break-word; max-height: 360px; overflow: auto; font-family: ui-monospace, Consolas, monospace; }
+table { width: 100%; border-collapse: collapse; font-size: .88rem; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--grid); }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--ink-2); font-weight: 600; }
+.tablewrap { overflow-x: auto; }
+details summary { cursor: pointer; color: var(--ink-2); margin-top: 10px; min-height: 32px; }
+.tokens { display: flex; flex-wrap: wrap; gap: 3px; margin: 6px 0 4px; font-family: ui-monospace, Consolas, monospace; font-size: .9rem; }
+.tokens span { padding: 2px 4px; border-radius: 4px; white-space: pre; }
+.tokens span:nth-child(odd) { background: var(--tok-a); }
+.tokens span:nth-child(even) { background: var(--tok-b); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; font-family: ui-monospace, Consolas, monospace; font-size: .85rem; }
+.chips span { background: var(--surface-2); border-radius: 6px; padding: 3px 7px; white-space: pre; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.sample { padding: 10px 0; border-bottom: 1px solid var(--grid); }
+.sample:last-child { border-bottom: 0; }
+.tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--surface); padding: 6px 9px;
+  border-radius: 6px; font-size: .82rem; z-index: 10; display: none; max-width: 280px; }
+.banner { grid-column: span 12; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); }
+.banner.error { border-color: var(--critical); }
+.muted { color: var(--muted); }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>LLM 2005 – trénink tokenizéru</h1>
+    <div class="sub" id="subtitle">Načítám stav…</div>
+  </div>
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+    <span class="pill" id="conn"><span class="dot" style="background:var(--muted)"></span> čekám</span>
+    <button id="themeBtn" type="button" title="Přepnout světlý / tmavý režim">Režim: auto</button>
+  </div>
+</header>
+
+<main>
+  <div class="banner hidden" id="banner"></div>
+
+  <section class="card">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px">
+      <div>
+        <div class="sub">Celkový průběh</div>
+        <div class="big" id="pct">–</div>
+      </div>
+      <div class="pill" id="state">–</div>
+    </div>
+    <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" id="mainbar"><div id="mainfill" style="width:0"></div></div>
+    <div class="tiles">
+      <div class="tile"><div class="label">Uplynulo</div><div class="value" id="elapsed">–</div></div>
+      <div class="tile"><div class="label">Zbývá (odhad)</div><div class="value" id="eta">–</div></div>
+      <div class="tile"><div class="label">Rychlost</div><div class="value" id="rate">–</div></div>
+      <div class="tile"><div class="label">Paměť procesu</div><div class="value" id="mem">–</div></div>
+      <div class="tile"><div class="label">Cílový slovník</div><div class="value" id="vocab">–</div></div>
+    </div>
+  </section>
+
+  <section class="card half">
+    <h2>Fáze</h2>
+    <ul class="phases" id="phases"></ul>
+  </section>
+
+  <section class="card half">
+    <h2>Rychlost zpracování (znaků/s)</h2>
+    <div id="rateChart"></div>
+    <div class="sub" style="margin-top:6px">Svislé čárkované čáry = začátek další fáze. Při skládání tokenů knihovna nic nehlásí, proto je rychlost 0.</div>
+  </section>
+
+  <section class="card">
+    <h2>Zdroje – kolik textu je ve směsi</h2>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--s1)"></i>vybráno do vzorku</span>
+      <span><i class="sw" style="background:var(--s2)"></i>už prošlo tréninkem</span>
+      <span><i class="sw outline"></i>cíl podle configs/mix.json</span>
+    </div>
+    <div id="srcChart"></div>
+    <details><summary>Tabulka s čísly</summary><div class="tablewrap" id="srcTable"></div></details>
+  </section>
+
+  <section class="card">
+    <h2>Log (posledních 15 řádků)</h2>
+    <pre class="log" id="log">–</pre>
+  </section>
+
+  <section class="card hidden" id="reportCard">
+    <h2>Kontrola po tréninku <span class="sub" id="reportWhen"></span></h2>
+    <div class="tiles" id="reportTiles"></div>
+    <h2 style="margin-top:20px">Ukázkové věty z roku 2005 rozdělené na tokeny</h2>
+    <div id="samples"></div>
+    <h2 style="margin-top:20px">Znaků na token podle zdroje <span class="sub">(víc = text se vejde do méně tokenů)</span></h2>
+    <div id="cptChart"></div>
+    <details><summary>Tabulka s čísly</summary><div class="tablewrap" id="cptTable"></div></details>
+    <h2 style="margin-top:20px">30 nejdelších tokenů <span class="sub">(· = mezera, ↵ = nový řádek)</span></h2>
+    <div class="chips" id="longest"></div>
+  </section>
+</main>
+<div class="tip" id="tip"></div>
+
+<script>
+"use strict";
+const STATUS_URL = "/progress/tokenizer-status.json";
+const REPORT_URL = "/progress/tokenizer-report.json";
+const $ = (id) => document.getElementById(id);
+const nf = new Intl.NumberFormat("cs-CZ");
+const SVGNS = "http://www.w3.org/2000/svg";
+
+// ---------- režim (auto / světlý / tmavý) ----------
+const themes = ["auto", "light", "dark"], themeNames = { auto: "auto", light: "světlý", dark: "tmavý" };
+function applyTheme(t) {
+  if (t === "auto") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", t);
+  $("themeBtn").textContent = "Režim: " + themeNames[t];
+  try { localStorage.setItem("llm2005-theme", t); } catch (e) {}
+}
+let theme = "auto";
+try { theme = localStorage.getItem("llm2005-theme") || "auto"; } catch (e) {}
+applyTheme(theme);
+$("themeBtn").onclick = () => { theme = themes[(themes.indexOf(theme) + 1) % 3]; applyTheme(theme); };
+
+// ---------- formátování ----------
+function dur(s) {
+  if (s == null || !isFinite(s)) return "–";
+  s = Math.max(0, Math.round(s));
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  if (h) return `${h} h ${m} min`;
+  if (m) return `${m} min ${sec} s`;
+  return `${sec} s`;
+}
+function big(n) {
+  if (n == null) return "–";
+  if (n >= 1e9) return (n / 1e9).toLocaleString("cs-CZ", { maximumFractionDigits: 2 }) + " mld.";
+  if (n >= 1e6) return (n / 1e6).toLocaleString("cs-CZ", { maximumFractionDigits: 1 }) + " mil.";
+  if (n >= 1e3) return (n / 1e3).toLocaleString("cs-CZ", { maximumFractionDigits: 1 }) + " tis.";
+  return nf.format(Math.round(n));
+}
+function esc(t) { return String(t).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function el(tag, attrs = {}, text) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (text != null) e.textContent = text;
+  return e;
+}
+function visible(t) { return t.replace(/ /g, "·").replace(/\n/g, "↵").replace(/\t/g, "⇥"); }
+const pctFmt = v => (100 * v).toLocaleString("cs-CZ", { maximumFractionDigits: 2 }) + " %";
+
+// ---------- tooltip ----------
+const tip = $("tip");
+function showTip(ev, html) {
+  tip.innerHTML = html; tip.style.display = "block";
+  const x = Math.min(ev.clientX + 14, innerWidth - tip.offsetWidth - 8);
+  const y = Math.min(ev.clientY + 14, innerHeight - tip.offsetHeight - 8);
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+}
+function hideTip() { tip.style.display = "none"; }
+
+// ---------- graf rychlosti (jedna řada, čára) ----------
+function drawRate(hist, phases) {
+  const box = $("rateChart"); box.innerHTML = "";
+  const W = 560, H = 220, L = 64, R = 10, T = 10, B = 28;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Graf rychlosti zpracování v čase" });
+  box.appendChild(svg);
+  if (!hist || hist.length < 2) { svg.appendChild(el("text", { x: W / 2, y: H / 2, "text-anchor": "middle" }, "Zatím málo dat…")); return; }
+  const t0 = hist[0][0], t1 = hist[hist.length - 1][0];
+  const maxV = Math.max(1, ...hist.map(h => h[1])) * 1.1;
+  const x = t => L + (W - L - R) * (t - t0) / Math.max(1, t1 - t0);
+  const y = v => T + (H - T - B) * (1 - v / maxV);
+  for (let i = 0; i <= 4; i++) {
+    const v = maxV * i / 4, yy = y(v);
+    svg.appendChild(el("line", { x1: L, x2: W - R, y1: yy, y2: yy, stroke: i ? "var(--grid)" : "var(--axis)", "stroke-width": 1 }));
+    svg.appendChild(el("text", { x: L - 6, y: yy + 4, "text-anchor": "end" }, big(v)));
+  }
+  let prev = null;
+  hist.forEach(h => {
+    if (h[2] !== prev && prev !== null) {
+      const xx = x(h[0]);
+      svg.appendChild(el("line", { x1: xx, x2: xx, y1: T, y2: H - B, stroke: "var(--axis)", "stroke-dasharray": "3 3" }));
+    }
+    prev = h[2];
+  });
+  svg.appendChild(el("text", { x: L, y: H - 8 }, "před " + dur(t1 - t0)));
+  svg.appendChild(el("text", { x: W - R, y: H - 8, "text-anchor": "end" }, "teď"));
+  const d = hist.map((h, i) => (i ? "L" : "M") + x(h[0]).toFixed(1) + " " + y(h[1]).toFixed(1)).join(" ");
+  svg.appendChild(el("path", { d, fill: "none", stroke: "var(--s1)", "stroke-width": 2, "stroke-linejoin": "round" }));
+  const cross = el("line", { y1: T, y2: H - B, stroke: "var(--ink-2)", "stroke-width": 1, visibility: "hidden" });
+  const dot = el("circle", { r: 4, fill: "var(--s1)", stroke: "var(--surface)", "stroke-width": 2, visibility: "hidden" });
+  svg.append(cross, dot);
+  const hit = el("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent" });
+  svg.appendChild(hit);
+  const phaseName = id => (phases.find(p => p.id === id) || {}).label || id || "";
+  hit.addEventListener("pointermove", ev => {
+    const r = svg.getBoundingClientRect();
+    const tx = t0 + (t1 - t0) * ((ev.clientX - r.left) * W / r.width - L) / (W - L - R);
+    let best = hist[0];
+    for (const h of hist) if (Math.abs(h[0] - tx) < Math.abs(best[0] - tx)) best = h;
+    const xx = x(best[0]), yy = y(best[1]);
+    cross.setAttribute("x1", xx); cross.setAttribute("x2", xx); cross.setAttribute("visibility", "visible");
+    dot.setAttribute("cx", xx); dot.setAttribute("cy", yy); dot.setAttribute("visibility", "visible");
+    showTip(ev, `<b>${big(best[1])} znaků/s</b><br>${dur(best[0])} od startu<br>${esc(phaseName(best[2]))}`);
+  });
+  hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); hideTip(); });
+}
+
+// ---------- vodorovné sloupce (zdroje) ----------
+function drawSources(sources) {
+  const box = $("srcChart"); box.innerHTML = "";
+  if (!sources || !sources.length) { box.innerHTML = '<p class="muted">Zatím žádná data o zdrojích.</p>'; $("srcTable").innerHTML = ""; return; }
+  const rows = sources.map(s => ({ ...s, target: s.target_chars || s.sampled_chars || 0 }))
+    .sort((a, b) => (b.target || 0) - (a.target || 0));
+  const maxV = Math.max(1, ...rows.map(r => Math.max(r.target || 0, r.sampled_chars || 0)));
+  const W = 1000, rowH = 34, L = 150, R = 170, T = 4;
+  const H = T + rows.length * rowH + 4;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Sloupce podle zdrojů" });
+  box.appendChild(svg);
+  const x = v => (W - L - R) * v / maxV;
+  rows.forEach((r, i) => {
+    const y0 = T + i * rowH;
+    svg.appendChild(el("text", { x: L - 10, y: y0 + 18, "text-anchor": "end", style: "fill:var(--ink);font-size:14px" }, r.source));
+    if (r.target_chars) svg.appendChild(el("rect", { x: L, y: y0 + 3, width: Math.max(2, x(r.target_chars)), height: 16, rx: 4,
+      fill: "none", stroke: "var(--ink-2)", "stroke-dasharray": "4 3", "stroke-width": 1.2 }));
+    svg.appendChild(el("rect", { x: L, y: y0 + 3, width: x(r.sampled_chars || 0), height: 16, rx: 4, fill: "var(--s1)" }));
+    svg.appendChild(el("rect", { x: L, y: y0 + 22, width: x(r.trained_chars || 0), height: 6, rx: 3, fill: "var(--s2)" }));
+    const share = r.share_percent != null ? ` · ${r.share_percent.toLocaleString("cs-CZ")} %` : "";
+    svg.appendChild(el("text", { x: W - R + 8, y: y0 + 18, style: "fill:var(--ink-2);font-size:13px" }, big(r.sampled_chars || 0) + share));
+    const hit = el("rect", { x: 0, y: y0, width: W, height: rowH, fill: "transparent" });
+    hit.addEventListener("pointermove", ev => showTip(ev,
+      `<b>${esc(r.source)}</b>${r.whole ? " (celý zdroj)" : ""}<br>cíl: ${r.whole ? "vše" : big(r.target_chars) + " znaků"}<br>` +
+      `ve vzorku: ${big(r.sampled_chars || 0)} znaků, ${nf.format(r.sampled_docs || 0)} dok.<br>` +
+      `prošlo tréninkem: ${big(r.trained_chars || 0)} znaků<br>v DB: ${r.available_docs ? nf.format(r.available_docs) + " dok." : "–"}`));
+    hit.addEventListener("pointerleave", hideTip);
+    svg.appendChild(hit);
+  });
+  let t = "<table><tr><th>Zdroj</th><th>Cíl (znaků)</th><th>Ve vzorku (znaků)</th><th>Dokumentů</th><th>Podíl</th><th>Tréninkem prošlo</th></tr>";
+  for (const r of rows) t += `<tr><td>${esc(r.source)}</td><td>${r.whole ? "celý" : nf.format(r.target_chars || 0)}</td>` +
+    `<td>${nf.format(r.sampled_chars || 0)}</td><td>${nf.format(r.sampled_docs || 0)}</td>` +
+    `<td>${r.share_percent != null ? r.share_percent.toLocaleString("cs-CZ") + " %" : "–"}</td><td>${nf.format(r.trained_chars || 0)}</td></tr>`;
+  $("srcTable").innerHTML = t + "</table>";
+}
+
+// ---------- fáze ----------
+const ICONS = { done: "✔", running: "▶", pending: "○", error: "✖", skipped: "↷" };
+const STATE_CZ = { done: "hotovo", running: "běží", pending: "čeká", error: "chyba", skipped: "přeskočeno" };
+function drawPhases(phases) {
+  const ul = $("phases"); ul.innerHTML = "";
+  for (const p of phases) {
+    const li = document.createElement("li");
+    li.className = "state-" + p.state + (p.state === "running" ? " running" : "");
+    const eta = p.state === "running" && p.eta_s != null ? `<br>zbývá ${p.eta_is_estimate ? "~" : ""}${dur(p.eta_s)}` : "";
+    li.innerHTML = `<span class="icon" aria-hidden="true">${ICONS[p.state] || "?"}</span>
+      <div><div>${esc(p.label)} <span class="sub">(${STATE_CZ[p.state] || esc(p.state)})</span></div>
+      <div class="note">${esc(p.note || "")}</div>
+      ${p.state === "running" ? `<div class="minibar"><div style="width:${p.percent}%"></div></div>` : ""}</div>
+      <span class="meta">${p.state === "running" ? p.percent.toLocaleString("cs-CZ") + " %<br>" : ""}${p.elapsed_s != null ? dur(p.elapsed_s) : ""}${eta}</span>`;
+    ul.appendChild(li);
+  }
+}
+
+// ---------- report ----------
+let reportStamp = null;
+function drawReport(r, status) {
+  $("reportCard").classList.remove("hidden");
+  const old = status && status.started_at && r.generated_at && new Date(r.generated_at.replace(" ", "T")) < new Date(status.started_at);
+  $("reportWhen").textContent = `(${r.generated_at}${old ? " – z předchozího běhu" : ""})`;
+  const cpt = r.chars_per_token || {}, bs = (r.byte_token_share || {}).mix_weighted;
+  const tiles = [
+    ["Skutečný slovník", nf.format(r.vocab_size) + " tokenů"],
+    ["Znaků na token (vážený směsí)", cpt.mix_weighted != null ? cpt.mix_weighted.toLocaleString("cs-CZ") : "–"],
+    ["Podíl bajtových tokenů v textu", bs != null ? pctFmt(bs) : "–"],
+    ["z toho ne-ASCII kousky znaků", (r.byte_token_share || {}).nonascii_mix_weighted != null ? pctFmt(r.byte_token_share.nonascii_mix_weighted) : "–"],
+    ["Bajtových tokenů ve slovníku", nf.format(r.byte_tokens_in_vocab)],
+    ["Doba tréninku", r.train_seconds != null ? dur(r.train_seconds) : "–"],
+  ];
+  $("reportTiles").innerHTML = tiles.map(([l, v]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v}</div></div>`).join("");
+  const sm = $("samples"); sm.innerHTML = "";
+  for (const s of r.samples || []) {
+    const d = document.createElement("div"); d.className = "sample";
+    d.innerHTML = `<div><b></b> <span class="sub"></span></div><div class="tokens"></div>`;
+    d.querySelector("b").textContent = s.label;
+    d.querySelector(".sub").textContent = `${s.n_chars} znaků → ${s.n_tokens} tokenů (${s.chars_per_token.toLocaleString("cs-CZ")} zn/tok)` +
+      (s.roundtrip_ok ? "" : " ⚠ zpětný převod nesedí");
+    const tk = d.querySelector(".tokens");
+    s.tokens.forEach((t, i) => { const sp = document.createElement("span"); sp.textContent = visible(t); sp.title = "id " + s.ids[i]; tk.appendChild(sp); });
+    sm.appendChild(d);
+  }
+  const rows = (r.per_source || []).slice().sort((a, b) => b.chars_per_token - a.chars_per_token);
+  const box = $("cptChart"); box.innerHTML = "";
+  if (rows.length) {
+    const W = 1000, rowH = 28, L = 150, R = 90, H = rows.length * rowH + 8;
+    const maxV = Math.max(...rows.map(p => p.chars_per_token)) * 1.05;
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Znaků na token podle zdroje" });
+    rows.forEach((p, i) => {
+      const y0 = 4 + i * rowH, w = (W - L - R) * p.chars_per_token / maxV;
+      svg.appendChild(el("text", { x: L - 10, y: y0 + 15, "text-anchor": "end", style: "fill:var(--ink);font-size:14px" }, p.source));
+      svg.appendChild(el("rect", { x: L, y: y0 + 3, width: w, height: 16, rx: 4, fill: "var(--s1)" }));
+      svg.appendChild(el("text", { x: L + w + 8, y: y0 + 15, style: "fill:var(--ink-2);font-size:13px" }, p.chars_per_token.toLocaleString("cs-CZ")));
+      const hit = el("rect", { x: 0, y: y0, width: W, height: rowH, fill: "transparent" });
+      hit.addEventListener("pointermove", ev => showTip(ev, `<b>${esc(p.source)}</b><br>${p.chars_per_token.toLocaleString("cs-CZ")} znaků/token<br>` +
+        `bajtové tokeny: ${pctFmt(p.byte_token_share)}<br>měřeno na ${big(p.eval_chars)} znacích`));
+      hit.addEventListener("pointerleave", hideTip);
+      svg.appendChild(hit);
+    });
+    box.appendChild(svg);
+  }
+  let t = "<table><tr><th>Zdroj</th><th>Znaků/token</th><th>Bajtové tokeny</th><th>z toho ne-ASCII</th><th>Měřeno znaků</th><th>Ve směsi znaků</th></tr>";
+  for (const p of rows) t += `<tr><td>${esc(p.source)}</td><td>${p.chars_per_token.toLocaleString("cs-CZ")}</td>` +
+    `<td>${pctFmt(p.byte_token_share)}</td><td>${pctFmt(p.nonascii_byte_token_share)}</td>` +
+    `<td>${nf.format(p.eval_chars)}</td><td>${nf.format(p.mix_chars)}</td></tr>`;
+  $("cptTable").innerHTML = t + "</table>" + `<p class="sub">${esc(r.eval_note || "")}</p>`;
+  const lg = $("longest"); lg.innerHTML = "";
+  for (const tkn of r.longest_tokens || []) {
+    const sp = document.createElement("span"); sp.textContent = visible(tkn.token); sp.title = `id ${tkn.id}, ${tkn.length} znaků`; lg.appendChild(sp);
+  }
+}
+
+// ---------- hlavní smyčka ----------
+function setConn(ok, text) {
+  $("conn").innerHTML = `<span class="dot" style="background:${ok ? "var(--good)" : "var(--critical)"}"></span> `;
+  $("conn").append(text);
+}
+async function loadReport(s) {
+  try {
+    const res = await fetch(REPORT_URL + "?t=" + Date.now(), { cache: "no-store" });
+    if (res.ok) { const r = await res.json(); if (r.generated_at !== reportStamp) { reportStamp = r.generated_at; drawReport(r, s); } }
+  } catch (e) {}
+}
+async function tick() {
+  let s = null;
+  try {
+    const res = await fetch(STATUS_URL + "?t=" + Date.now(), { cache: "no-store" });
+    if (res.status === 404) { setConn(true, "spojeno"); $("subtitle").textContent = "Trénink ještě nezačal (stav zatím neexistuje)."; loadReport(null); return; }
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    s = await res.json();
+  } catch (e) {
+    setConn(false, location.protocol === "file:" ? "otevři přes http://localhost:8800" : "server neodpovídá");
+    return;
+  }
+  const age = (Date.now() - new Date(s.updated_at).getTime()) / 1000;
+  const stale = s.state === "running" && age > 30;
+  setConn(!stale, stale ? `stav starý ${dur(age)} – běží ještě úloha?` : (s.state === "running" ? "živě" : "spojeno"));
+  $("subtitle").textContent = `${s.title} · start ${new Date(s.started_at).toLocaleString("cs-CZ")} · aktualizace ${new Date(s.updated_at).toLocaleTimeString("cs-CZ")}`;
+  const pct = s.percent || 0;
+  $("pct").textContent = pct.toLocaleString("cs-CZ", { maximumFractionDigits: 1 }) + " %";
+  $("mainfill").style.width = pct + "%";
+  $("mainbar").setAttribute("aria-valuenow", pct);
+  $("state").textContent = { running: "▶ běží", done: "✔ hotovo", error: "✖ chyba" }[s.state] || s.state;
+  $("elapsed").textContent = dur(s.elapsed_s);
+  $("eta").textContent = s.state === "done" ? "hotovo" : s.state === "error" ? "–" : (s.eta_s != null ? "~" + dur(s.eta_s) : "počítám…");
+  $("rate").textContent = s.rate ? big(s.rate.value) + " " + s.rate.unit : "–";
+  $("mem").textContent = s.memory_gb != null ? s.memory_gb.toLocaleString("cs-CZ") + " GB" : "–";
+  $("vocab").textContent = s.vocab_target ? nf.format(s.vocab_target) : "–";
+  const b = $("banner");
+  if (s.state === "error") { b.className = "banner error"; b.textContent = "✖ Úloha skončila chybou: " + (s.error || "?"); }
+  else if (s.state === "done" && s.result) {
+    b.className = "banner";
+    b.textContent = `✔ Hotovo za ${dur(s.result.total_seconds)} · slovník ${nf.format(s.result.vocab_size)} tokenů · ` +
+      `${s.result.chars_per_token} znaků/token · uloženo do ${s.out}`;
+  } else b.className = "banner hidden";
+  drawPhases(s.phases || []);
+  drawRate(s.rate_history || [], s.phases || []);
+  drawSources(s.sources || []);
+  $("log").textContent = (s.log || []).join("\n") || "–";
+  loadReport(s);
+}
+tick();
+setInterval(tick, 2000);
+</script>
+</body>
+</html>

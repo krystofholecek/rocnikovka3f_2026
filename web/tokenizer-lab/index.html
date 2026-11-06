@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tokenizer Lab</title>
+  <meta name="description" content="Vizualizace BPE tokenizace přímo v prohlížeči – ročníková práce LLM 2005.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='9' width='12' height='14' rx='3' fill='%232a78d6'/%3E%3Crect x='18' y='9' width='12' height='14' rx='3' fill='%23eb6834'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <a class="skip" href="#main">Přeskočit na obsah</a>
+  <header class="top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"><i></i><i></i></span>
+      <div>
+        <h1>Tokenizer Lab</h1>
+        <p class="sub">Jak BPE skládá tokeny z bajtů · ročníková práce <b>LLM 2005</b></p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span class="chip" id="tokChip" title="Tokenizér použitý v prohlížeči a pipeline">Tokenizér: žádný</span>
+      <button class="btn ghost" id="presentBtn" aria-pressed="false" title="Větší písmo pro projektor">Prezentace</button>
+      <button class="btn ghost" id="themeBtn" title="Přepnout motiv">Motiv: systém</button>
+    </div>
+  </header>
+
+  <p class="privacy" role="note">🔒 Vše běží jen ve vašem prohlížeči. Nahrané soubory se <b>nikam neodesílají</b> – žádný server, žádné účty.</p>
+
+  <nav class="tabs" role="tablist" aria-label="Části aplikace">
+    <button role="tab" id="tab-data" aria-controls="panel-data" aria-selected="true"><span>1</span> Data</button>
+    <button role="tab" id="tab-train" aria-controls="panel-train" aria-selected="false" tabindex="-1"><span>2</span> Trénink BPE</button>
+    <button role="tab" id="tab-view" aria-controls="panel-view" aria-selected="false" tabindex="-1"><span>3</span> Prohlížeč tokenizace</button>
+    <button role="tab" id="tab-pipe" aria-controls="panel-pipe" aria-selected="false" tabindex="-1"><span>4</span> Pipeline „prepare“</button>
+  </nav>
+
+  <main id="main">
+    <!-- 1 DATA -->
+    <section role="tabpanel" id="panel-data" aria-labelledby="tab-data" class="panel">
+      <div class="grid2">
+        <div class="card">
+          <h2>Nahrát textové soubory</h2>
+          <label class="drop" id="drop" for="fileInput">
+            <input type="file" id="fileInput" multiple accept=".txt,.md,.jsonl,.ndjson,.csv,text/plain">
+            <span class="drop-icon" aria-hidden="true">⇪</span>
+            <span><b>Přetáhněte soubory sem</b> nebo klikněte pro výběr</span>
+            <small>.txt · .md · .jsonl · .csv — více souborů najednou, celkem do 200 MB</small>
+          </label>
+          <div class="row">
+            <button class="btn" id="sampleBtn">Použít ukázková data</button>
+            <label class="inline">Pole s textem (JSONL/CSV)
+              <input type="text" id="fieldInput" value="text" size="10" spellcheck="false">
+            </label>
+          </div>
+          <div id="dataWarn" class="warn" hidden role="alert"></div>
+        </div>
+        <div class="card">
+          <h2>Jak to funguje</h2>
+          <ol class="steps">
+            <li><b>Data</b> – nahrajete texty (nebo ukázku).</li>
+            <li><b>Trénink</b> – začneme s 256 bajty a opakovaně slučujeme nejčastější sousední dvojici. Každé spojení = nový token.</li>
+            <li><b>Prohlížeč</b> – uvidíte, jak tokenizér rozseká text a že se dá vrátit zpět beze ztráty.</li>
+            <li><b>Pipeline</b> – jak z dokumentů vzniknou <code>train.bin</code> a <code>val.bin</code> pro trénink modelu.</li>
+          </ol>
+          <p class="muted">Tokenizér je stejný jako v Pythonu: <code>models.BPE</code> + <code>ByteLevel</code>, speciální token <code>&lt;|endoftext|&gt;</code>. Exportovaný <code>tokenizer.json</code> načte <code>Tokenizer.from_file()</code>.</p>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h2>Nahraná data</h2>
+          <span class="muted" id="dataTotals" aria-live="polite">Zatím nic nenahráno.</span>
+        </div>
+        <div class="table-wrap">
+          <table class="files">
+            <thead><tr><th scope="col">Soubor</th><th scope="col" class="num">Velikost</th><th scope="col" class="num">Znaků</th><th scope="col" class="num">Slov (odhad)</th><th scope="col" class="num">Dokumentů</th><th scope="col">Stav</th><th scope="col"><span class="sr">Akce</span></th></tr></thead>
+            <tbody id="fileRows"><tr class="empty"><td colspan="7">Nahrajte soubory nebo použijte ukázková data.</td></tr></tbody>
+          </table>
+        </div>
+        <div class="row end"><button class="btn primary" id="toTrainBtn" disabled>Pokračovat na trénink →</button></div>
+      </div>
+    </section>
+
+    <!-- 2 TRAIN -->
+    <section role="tabpanel" id="panel-train" aria-labelledby="tab-train" class="panel" hidden>
+      <div class="card">
+        <div class="controls">
+          <label>Velikost slovníku
+            <input type="number" id="vocabInput" min="500" max="32000" step="100" value="2000">
+          </label>
+          <label>Vzorek dat (MB)
+            <input type="number" id="sampleMBInput" min="0.1" max="200" step="0.5" value="5">
+          </label>
+          <div class="btns" role="group" aria-label="Ovládání tréninku">
+            <button class="btn primary" id="startBtn">▶ Start</button>
+            <button class="btn" id="pauseBtn" disabled>⏸ Pauza</button>
+            <button class="btn" id="resumeBtn" disabled>⏵ Pokračovat</button>
+            <button class="btn" id="stepBtn" title="Provede jedno spojení s animací">⏭ Krok</button>
+            <button class="btn ghost" id="resetBtn" disabled>↺ Reset</button>
+          </div>
+        </div>
+        <div class="progress" aria-hidden="true"><div id="progBar"></div></div>
+        <div class="stats" id="trainStats" aria-live="polite">
+          <div><span>Spojení</span><b id="stMerges">0 / 0</b></div>
+          <div><span>Slovník</span><b id="stVocab">–</b></div>
+          <div><span>Čas</span><b id="stTime">0,0 s</b></div>
+          <div><span>Rychlost</span><b id="stRate">–</b></div>
+          <div><span>Znaků / token</span><b id="stCpt">–</b></div>
+          <div><span>Vzorek</span><b id="stSample">–</b></div>
+        </div>
+        <p class="muted small" id="trainMsg">Zdroj dat: nahrané soubory (nebo ukázka, pokud nic nenahrajete).</p>
+      </div>
+
+      <div class="card step-card">
+        <div class="card-head">
+          <h2>Krokování: co se právě slučuje</h2>
+          <label class="inline">Vzorová věta
+            <input type="text" id="stepSentence" spellcheck="false">
+          </label>
+        </div>
+        <p class="merge-caption" id="stepCaption" aria-live="polite">Stiskněte <b>⏭ Krok</b> – provede se jedno spojení a ve větě se zvýrazní dvojice, která se slučuje.</p>
+        <div class="tokens big" id="stepTokens"></div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h2>Poslední spojení</h2>
+          <div class="table-wrap short">
+            <table class="merges">
+              <thead><tr><th scope="col" class="num">#</th><th scope="col">Spojení</th><th scope="col">Nový token</th><th scope="col" class="num">Četnost</th></tr></thead>
+              <tbody id="mergeRows"><tr class="empty"><td colspan="4">Zatím žádná spojení.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Znaků na token v průběhu tréninku</h2>
+          <div class="chart"><canvas id="cptChart" role="img" aria-label="Graf znaků na token"></canvas></div>
+          <p class="muted small">Čím víc spojení, tím delší tokeny a tím méně tokenů na stejný text.</p>
+        </div>
+        <div class="card">
+          <h2>Délky naučených tokenů</h2>
+          <div class="chart"><canvas id="histChart" role="img" aria-label="Histogram délek tokenů"></canvas></div>
+          <p class="muted small">Počet tokenů podle délky v bajtech (bez 256 základních bajtů); poslední sloupec = 12 a více.</p>
+        </div>
+        <div class="card">
+          <h2>Nejdelší naučené tokeny</h2>
+          <ol class="longest" id="longestList"><li class="muted">Zatím nic.</li></ol>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Uložit / načíst tokenizér</h2>
+        <div class="row">
+          <button class="btn" id="dlJsonBtn" disabled>⇩ tokenizer.json</button>
+          <button class="btn" id="dlCsvBtn" disabled>⇩ slovník + spojení (CSV)</button>
+          <label class="btn ghost file-btn">⇧ Načíst hotový tokenizer.json
+            <input type="file" id="loadTokInput" accept=".json,application/json">
+          </label>
+        </div>
+        <p class="muted small">Formát Hugging Face <code>tokenizers</code> – v Pythonu: <code>Tokenizer.from_file("tokenizer.json")</code>. Načtený tokenizér (např. ostrý s 32 000 tokeny) se použije jen pro zobrazení, bez tréninku.</p>
+        <p class="small" id="loadMsg" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <!-- 3 VIEW -->
+    <section role="tabpanel" id="panel-view" aria-labelledby="tab-view" class="panel" hidden>
+      <div class="card">
+        <div class="card-head">
+          <h2>Text k tokenizaci</h2>
+          <div class="row">
+            <label class="inline">Vložit z
+              <select id="viewSource"><option value="">— vlastní text —</option></select>
+            </label>
+            <label class="inline">Tokenizér
+              <select id="viewTok"></select>
+            </label>
+          </div>
+        </div>
+        <textarea id="viewText" rows="5" spellcheck="false" aria-label="Text k tokenizaci"></textarea>
+        <div class="slider-row">
+          <label for="mergeSlider">Použitá spojení: <b id="mergeVal">vše</b></label>
+          <input type="range" id="mergeSlider" min="0" max="0" value="0">
+          <div class="btns" role="group" aria-label="Rychlá volba počtu spojení">
+            <button class="btn small" data-merges="0">0</button>
+            <button class="btn small" data-merges="100">100</button>
+            <button class="btn small" data-merges="500">500</button>
+            <button class="btn small" data-merges="2000">2 000</button>
+            <button class="btn small" data-merges="all">vše</button>
+          </div>
+        </div>
+        <div class="row">
+          <label class="check"><input type="checkbox" id="showSpaces" checked> zobrazit mezery jako ·</label>
+          <label class="check"><input type="checkbox" id="showWords"> zvýraznit hranice předtokenů</label>
+        </div>
+      </div>
+      <div class="card">
+        <div class="stats" id="viewStats">
+          <div><span>Znaků</span><b id="vsChars">0</b></div>
+          <div><span>Bajtů (UTF-8)</span><b id="vsBytes">0</b></div>
+          <div><span>Tokenů</span><b id="vsTokens">0</b></div>
+          <div><span>Znaků / token</span><b id="vsCpt">–</b></div>
+        </div>
+        <div class="tokens" id="viewTokens" aria-label="Text rozdělený na tokeny"></div>
+        <p class="muted small" id="viewNote"></p>
+        <details class="ids">
+          <summary>ID tokenů (čísla, která vidí model)</summary>
+          <code id="viewIds"></code>
+        </details>
+        <div class="row">
+          <button class="btn" id="decodeBtn">Dekódovat zpět</button>
+          <span id="decodeResult" aria-live="polite"></span>
+        </div>
+        <pre class="decoded" id="decoded" hidden></pre>
+      </div>
+      <div class="card">
+        <h2>Srovnání: stejný text po různém počtu spojení</h2>
+        <div class="table-wrap">
+          <table class="compare">
+            <thead><tr><th scope="col" class="num">Spojení</th><th scope="col" class="num">Tokenů</th><th scope="col" class="num">Znaků / token</th><th scope="col">Rozdělení začátku textu</th></tr></thead>
+            <tbody id="compareRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4 PIPELINE -->
+    <section role="tabpanel" id="panel-pipe" aria-labelledby="tab-pipe" class="panel" hidden>
+      <div class="card">
+        <h2>Z dokumentů do <code>train.bin</code> / <code>val.bin</code></h2>
+        <p class="muted">Stejný postup jako <code>python -m llm2005.prepare</code>, jen jako náhled a statistika – binární soubory se negenerují.</p>
+        <ol class="flow" id="flow">
+          <li><b>Dokumenty</b><span id="fDocs">–</span></li>
+          <li><b>Tokenizace</b><span id="fTok">–</span></li>
+          <li><b>+ <code>&lt;|endoftext|&gt;</code></b><span id="fEot">za každý dokument</span></li>
+          <li><b>Rozdělení</b><span id="fSplit">train / val</span></li>
+          <li><b>uint16 → .bin</b><span id="fBin">2 bajty na token</span></li>
+        </ol>
+        <div class="controls">
+          <label>Podíl validace (%)
+            <input type="number" id="valInput" min="0" max="50" step="0.1" value="0.5">
+          </label>
+          <label>Zpracovat nejvýš (MB)
+            <input type="number" id="pipeMBInput" min="0.1" max="200" step="1" value="50">
+          </label>
+          <div class="btns">
+            <button class="btn primary" id="pipeBtn">▶ Spočítat</button>
+          </div>
+        </div>
+        <div class="progress" aria-hidden="true"><div id="pipeBar"></div></div>
+        <p class="small" id="pipeMsg" aria-live="polite"></p>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <h2>Výsledek</h2>
+          <div class="table-wrap">
+            <table class="pipe-table">
+              <thead><tr><th scope="col"></th><th scope="col" class="num">Dokumentů</th><th scope="col" class="num">Tokenů</th><th scope="col" class="num">Velikost .bin</th></tr></thead>
+              <tbody id="pipeRows"><tr class="empty"><td colspan="4">Spusťte výpočet.</td></tr></tbody>
+            </table>
+          </div>
+          <p class="small" id="pipeChecks"></p>
+        </div>
+        <div class="card">
+          <h2>Náhled proudu tokenů</h2>
+          <p class="muted small">Začátky prvních dokumentů tak, jak jdou za sebou do souboru – oddělené tokenem <code>&lt;|endoftext|&gt;</code>.</p>
+          <div class="tokens" id="pipePreview"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>Tokenizer Lab · ročníková práce LLM 2005 · běží offline, bez externích knihoven</p>
+  </footer>
+
+  <div class="tok-tip" id="tokTip" role="tooltip" hidden></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+"""Stažení surových dat zdroje na disk (pak se importují přes llm2005.ingest).
+
+Použití:
+    python -m llm2005.download pg19 D:\\llm2005-raw\\pg19
+"""
+from __future__ import annotations
+
+import argparse
+
+from .sources.pg19 import download_pg19
+
+DOWNLOADERS = {
+    "pg19": download_pg19,
+}
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description="Stáhne surová data zdroje.")
+    p.add_argument("source", choices=list(DOWNLOADERS))
+    p.add_argument("dest", help="cílová složka, např. D:\\llm2005-raw\\pg19")
+    a = p.parse_args()
+    DOWNLOADERS[a.source](a.dest)
+
+
+if __name__ == "__main__":
+    main()

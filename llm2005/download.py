@@ -2,15 +2,24 @@
 
 Použití:
     python -m llm2005.download pg19 D:\\llm2005-raw\\pg19
+    python -m llm2005.download enron D:\\llm2005-raw\\enron
+    python -m llm2005.download blogs D:\\llm2005-raw\\blogs
+    python -m llm2005.download arxiv D:\\llm2005-raw\\arxiv
 """
 from __future__ import annotations
 
 import argparse
 
+from .sources.arxiv import download_arxiv
+from .sources.blogs import download_blogs
+from .sources.enron import download_enron
 from .sources.pg19 import download_pg19
 
 DOWNLOADERS = {
     "pg19": download_pg19,
+    "enron": download_enron,
+    "blogs": download_blogs,
+    "arxiv": download_arxiv,
 }
 
 

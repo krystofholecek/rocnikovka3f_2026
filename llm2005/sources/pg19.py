@@ -19,12 +19,12 @@ takže ji ingest odmítne (tabulka `rejected`, důvod no_date).
 from __future__ import annotations
 
 import csv
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Iterator
 
 from ..document import Document
+from ._io import fetch
 
 SPLITS = ("train", "validation", "test")
 ASSET_ROOT_URL = "https://storage.googleapis.com/deepmind-gutenberg/"
@@ -74,23 +74,7 @@ def read_pg19(path: str) -> Iterator[Document]:
 
 # ---------- stažení ----------
 
-def _fetch(url: str, target: Path, retries: int = 5) -> int:
-    """Stáhne jeden soubor (přes .part, takže přerušené stahování nezanechá půlku)."""
-    if target.exists() and target.stat().st_size > 0:
-        return 0  # už je staženo -> stahování jde přerušit a znovu spustit
-    target.parent.mkdir(parents=True, exist_ok=True)
-    part = target.with_name(target.name + ".part")
-    for attempt in range(retries):
-        try:
-            with urllib.request.urlopen(url, timeout=60) as r:
-                data = r.read()
-            part.write_bytes(data)
-            part.replace(target)
-            return len(data)
-        except OSError:
-            if attempt == retries - 1:
-                raise
-    return 0
+_fetch = fetch  # společná funkce ze _io.py
 
 
 def download_pg19(dest: str, workers: int = 16) -> None:

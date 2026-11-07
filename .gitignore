@@ -29,3 +29,10 @@ checkpoints/
 # Web: složený výstup scripts/build_site.py (nasazuje Cloudflare)
 dist/
 .wrangler/
+
+# Nástroje a dočasné soubory
+.ruff_cache/
+.pytest_cache/
+node_modules/
+*.pt.tmp
+*.log

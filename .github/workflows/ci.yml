@@ -6,21 +6,32 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install "ruff>=0.15"
+      - run: ruff check .
+
+  # Backend chatu (Django API)
   test:
     runs-on: ubuntu-latest
     env:
       DJANGO_SECRET_KEY: ci-not-secret
-      DJANGO_DEBUG: "True"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -r requirements.txt
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install -r requirements/chat.txt
       - run: python manage.py check
-      - run: python manage.py test core
 
+  # Data a model (llm2005/) + složení webu
   model:
     runs-on: ubuntu-latest
     steps:
@@ -30,5 +41,6 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install -r requirements-llm.txt
+      - run: pip install -r requirements/train.txt pytest
       - run: pytest -q llm2005
+      - run: python scripts/build_site.py

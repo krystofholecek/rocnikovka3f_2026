@@ -6,8 +6,7 @@ import zipfile
 
 from llm2005.db import Database
 from llm2005.ingest import ingest
-from llm2005.sources import SOURCES
-from llm2005.sources import arxiv, blogs, enron
+from llm2005.sources import SOURCES, arxiv, blogs, enron
 
 LONG = "This is a long enough sentence for the minimum length filter. " * 5
 

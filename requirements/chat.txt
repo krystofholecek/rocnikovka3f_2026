@@ -1,0 +1,10 @@
+# Backend chatu (chat/): Django API nad natrénovaným modelem.
+# Pro server bez GPU nainstaluj nejdřív PyTorch pro CPU:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+Django==6.1.1
+python-dotenv==1.2.4
+gunicorn>=23
+tzdata>=2024.1; sys_platform == "win32"
+torch>=2.4
+numpy>=1.26
+tokenizers>=0.20

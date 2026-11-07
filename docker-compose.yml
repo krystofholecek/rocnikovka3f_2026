@@ -1,0 +1,45 @@
+# Backend chatu ChronosLLM (CPU). Návod: chat/README.md
+#
+#   1) cp .env.example .env  a vyplň DJANGO_SECRET_KEY (a CLOUDFLARE_TUNNEL_TOKEN pro tunel)
+#   2) model do checkpoints/chat/ (model.pt + tokenizer.json, viz python -m llm2005.export)
+#   3) docker compose up -d --build                       # jen API na http://127.0.0.1:8000
+#      docker compose --profile tunnel up -d --build      # + Cloudflare Tunnel na api.chronosllm.com
+services:
+  chat:
+    build:
+      context: .
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    env_file: .env
+    environment:
+      CHAT_MODEL_DIR: /models
+      CHAT_DEVICE: cpu
+      DJANGO_DEBUG: "false"
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-api.chronosllm.com,localhost,127.0.0.1}
+      # Server je dostupný jen přes Cloudflare -> skutečná IP návštěvníka je v této hlavičce.
+      CHAT_CLIENT_IP_HEADER: CF-Connecting-IP
+    volumes:
+      - ./checkpoints/chat:/models:ro
+    ports:
+      - "127.0.0.1:8000:8000"   # jen z tohoto počítače, ven vede tunel
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 2g
+    cpus: 2
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest   # pro jistotu připni konkrétní verzi (tag)
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}   # z .env; potřeba jen s --profile tunnel
+    depends_on:
+      - chat
+    restart: unless-stopped
+    profiles:
+      - tunnel

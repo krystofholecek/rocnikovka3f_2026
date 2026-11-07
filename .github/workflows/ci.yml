@@ -30,6 +30,7 @@ jobs:
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
       - run: pip install -r requirements/chat.txt
       - run: python manage.py check
+      - run: pip install pytest && pytest -q chat
 
   # Data a model (llm2005/) + složení webu
   model:

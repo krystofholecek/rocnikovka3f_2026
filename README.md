@@ -27,9 +27,9 @@ Co by řekl ChatGPT, kdyby vznikl v roce 2005? Tohle je ročníková práce 3.F 
 |---|---|
 | **Architektura** | GPT (decoder-only Transformer), velikost GPT-2 small (~125 M parametrů) |
 | **Tokenizer** | vlastní byte-level BPE, 32 000 tokenů |
-| **Trénovací data** | Wikipedie, knihy (Project Gutenberg), diskuse (Usenet), vše s ověřeným datem ≤ 31. 12. 2005 |
+| **Trénovací data** | ~20 mld. znaků (≈ 5 mld. tokenů, odhad): Wikipedie, knihy, Usenet, blogy, e-maily, soudní rozhodnutí a další; vše s ověřeným datem ≤ 31. 12. 2005 |
 | **Hardware** | jedna grafická karta NVIDIA RTX 3060, trénink přes noc |
-| **Výstup** | webový chat (Django) |
+| **Výstup** | webový chat (Django) na [chronosllm.com](https://chronosllm.com) (zatím ve vývoji) |
 
 ## Jak to funguje
 
@@ -59,13 +59,24 @@ Trénink se průběžně ukládá. Když ho spustíš znovu, pokračuje tam, kde
 
 ## Data
 
-| Zdroj | Stav | Jak se datuje |
-|---|---|---|
-| Wikipedie (historie revizí, archiv z roku 2006) | **hotovo**: 838 895 článků, ≈ 0,46 mld. tokenů | poslední revize článku do 31. 12. 2005 |
-| Knihy, Project Gutenberg (PG-19) | plán | datum vydání |
-| Usenet | plán | datum příspěvku |
+Stav k 6. 11. 2026. Všechny dokumenty prošly kontrolou data; co je novější nebo bez data, skončilo v tabulce `rejected`.
 
-Cíl milníku Data: **≥ 1 mld. tokenů**. Jiný zdroj stačí převést na JSON Lines (`source`, `source_id`, `date`, `text`) a nahrát přes `python -m llm2005.ingest jsonl soubor.jsonl`.
+| Zdroj | Dokumentů | Znaků | Období | Jak se datuje |
+|---|---:|---:|---|---|
+| Wikipedie – články (archiv 2006, historie revizí) | 838 895 | 1,95 mld. | 2003–2005 | poslední revize do 31. 12. 2005 |
+| Wikipedie – diskuzní stránky | 165 254 | 0,26 mld. | 2002–2005 | poslední revize do 31. 12. 2005 |
+| Knihy, Project Gutenberg (PG-19) | 28 750 | 11,48 mld. | 1483–1918 | rok vydání |
+| Usenet (archiv UTZOO) | 1 516 330 | 2,19 mld. | převážně 1981–1991 | hlavička `Date:` |
+| Blogy (Blog Authorship Corpus) | 511 984 | 0,72 mld. | 1999–2005 | datum příspěvku |
+| E-maily (Enron) | 149 633 | 0,29 mld. | převážně 1999–2002 | hlavička `Date:` |
+| Soudní rozhodnutí USA (CourtListener) | 381 171 | 3,55 mld. | 1980–2005 | datum rozhodnutí |
+| Wikisource, Wikinews, Wikibooks, Wikiquote | 9 599 | 0,03 mld. | 2003–2005 | poslední revize |
+| arXiv (abstrakty) | 6 092 | 0,005 mld. | 1991–2005 | datum poslední verze |
+| **Celkem** | **≈ 3,6 mil.** | **≈ 20,5 mld.** | | ≈ 5 mld. tokenů (odhad) |
+
+Cíl milníku Data (**≥ 1 mld. tokenů**) je splněný. Pro trénink se zdroje budou míchat v poměrech podle `configs/mix.json` (rozpracováno v [PR #20](https://github.com/krystofholecek/rocnikovka3f_2026/pull/20)): knih a soudních textů je méně, aby model mluvil přirozeně jako text z let kolem 2005.
+
+Jiný zdroj stačí převést na JSON Lines (`source`, `source_id`, `date`, `text`) a nahrát přes `python -m llm2005.ingest jsonl soubor.jsonl`.
 
 ## Model
 
@@ -95,7 +106,9 @@ pytest llm2005                     # testy
 
 ```text
 llm2005/          model a celý řetězec zpracování dat
-├── sources/      čtení zdrojů (Wikipedie, JSONL); nový zdroj = nový soubor
+├── sources/      čtení zdrojů (Wikipedie, PG-19, Enron, blogy, arXiv, Usenet, Wikimedia, CourtListener, JSONL);
+│                 nový zdroj = nový soubor
+├── ingest.py, download.py, modern_data.py   stažení zdrojů a import do databáze
 ├── datecheck.py  kontrola data (hranice 31. 12. 2005)
 ├── db.py         databáze dokumentů (SQLite)
 ├── tokenizer.py, prepare.py   tokenizer a převod na tokeny
@@ -104,14 +117,30 @@ llm2005/          model a celý řetězec zpracování dat
 configs/          velikosti modelu a nastavení tréninku
 config/ core/ templates/ static/   kostra webového chatu (Django)
 data/, checkpoints/                data a natrénované modely (nejsou v gitu, jsou velké)
+web/landing/, web/postup/          úvodní stránka a postup krok za krokem (chronosllm.com)
+web/tokenizer-lab/                 samostatný doprovodný web (viz níže)
+scripts/build_site.py, wrangler.jsonc   složení a nasazení webu (viz níže)
 ```
+
+### Doprovodný web: Tokenizer Lab
+
+Složka [`web/tokenizer-lab/`](web/tokenizer-lab/README.md) je **samostatný projekt** – statický web v JavaScriptu,
+který v prohlížeči ukazuje, jak náš BPE tokenizér skládá tokeny (trénink krok za krokem, barevné tokeny, pipeline
+`prepare`). S hlavním projektem nesdílí kód, má vlastní README a testy a hlavní projekt na něm nezávisí. Běží na
+[chronosllm.com/tokenizer](https://chronosllm.com/tokenizer/) (přístup jen pro tým).
+
+### Nasazení webu
+
+Web [chronosllm.com](https://chronosllm.com) se nasazuje automaticky přes Cloudflare Workers Builds po každém mergi do `main`.
+Build příkaz `python scripts/build_site.py` složí úvodní stránku, postup a Tokenizer Lab do složky `dist/`.
+Deploy příkaz `npx wrangler deploy` pak podle `wrangler.jsonc` nahraje obsah `dist/` jako statické soubory.
 
 ## Plán
 
 | Milník | Cíl | Termín |
 |---|---|---|
-| 1. Data | všechny zdroje a ≥ 1 mld. tokenů | 30. 11. 2026 |
-| 2. Malý model | první natrénovaný model, ověření postupu | 20. 12. 2026 |
+| 1. Data | všechny zdroje a ≥ 1 mld. tokenů | 30. 11. 2026 ✅ hotovo 6. 11. |
+| 2. Malý model | první natrénovaný model, ověření postupu (tokenizér se trénuje) | 20. 12. 2026 |
 | 3. Velký model | hlavní trénink (`base`), webový chat | 31. 1. 2027 |
 | 4. Vyhodnocení a práce | testování, psaní textu, obhajoba | 28. 2. 2027 |
 

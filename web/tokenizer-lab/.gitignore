@@ -1,0 +1,3 @@
+# Tokenizer Lab – závislosti pro testy a výstupy testů se necommitují
+node_modules/
+tests/out/

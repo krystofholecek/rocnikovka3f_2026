@@ -1,0 +1,3 @@
+A BOOK WITHOUT A YEAR
+
+This synthetic book has no publication year in metadata.csv, so the pipeline must refuse it and write it to the rejected table with the reason no_date. The text is long enough to pass the minimum length check of the ingest step.

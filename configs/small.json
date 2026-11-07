@@ -1,7 +1,8 @@
 {
   "name": "small",
-  "_popis": "Pokusný model ~25 M parametrů. Na GPU řádově hodiny.",
+  "_popis": "Pokusný model ~23 M parametrů. Na RTX 3060 ~65-80 tis. tokenů/s, 28 000 kroků ≈ 1,8 mld. tokenů ≈ 8 h (odhad).",
+  "_batch": "batch 32 × 512 se vejde do ~7 GB GPU; grad_accum 4 -> 65 536 tokenů na krok.",
   "model": {"vocab_size": 32000, "block_size": 512, "n_layer": 6, "n_head": 6, "n_embd": 384},
-  "train": {"batch_size": 32, "grad_accum": 4, "lr": 0.0006, "warmup_steps": 500, "max_steps": 10000,
+  "train": {"batch_size": 32, "grad_accum": 4, "lr": 0.0006, "warmup_steps": 500, "max_steps": 28000,
             "log_every": 50, "eval_every": 500, "eval_batches": 50}
 }

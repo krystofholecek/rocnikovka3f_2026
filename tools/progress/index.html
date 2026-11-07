@@ -95,6 +95,14 @@ details summary { cursor: pointer; color: var(--ink-2); margin-top: 10px; min-he
 .banner.error { border-color: var(--critical); }
 .muted { color: var(--muted); }
 .hidden { display: none !important; }
+/* záložka "Trénink modelu": ukáže jen karty .tcard, ostatní skryje (a naopak) */
+body:not(.train-mode) .tcard { display: none !important; }
+body.train-mode main > :not(.tcard) { display: none !important; }
+.sample .prompt { font-weight: 650; }
+.sample .gen { white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, Consolas, monospace; font-size: .9rem;
+  background: var(--surface-2); border-radius: 6px; padding: 6px 8px; margin: 4px 0 8px; }
+.tile .hint { color: var(--muted); font-size: .8rem; }
+label.chk { color: var(--ink-2); font-size: .88rem; display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -107,6 +115,7 @@ details summary { cursor: pointer; color: var(--ink-2); margin-top: 10px; min-he
     <div role="group" aria-label="Která úloha" style="display:flex; gap:4px">
       <button type="button" class="jobBtn" data-job="tokenizer" aria-pressed="false">Tokenizér</button>
       <button type="button" class="jobBtn" data-job="prepare" aria-pressed="false">Prepare</button>
+      <button type="button" class="jobBtn" data-job="train" aria-pressed="false">Trénink modelu</button>
     </div>
     <span class="pill" id="conn"><span class="dot" style="background:var(--muted)"></span> čekám</span>
     <button id="themeBtn" type="button" title="Přepnout světlý / tmavý režim">Režim: auto</button>
@@ -190,6 +199,55 @@ details summary { cursor: pointer; color: var(--ink-2); margin-top: 10px; min-he
     <div id="checkChart" style="margin-top:12px"></div>
   </section>
 
+  <!-- ===== Trénink modelu (data/progress/train-status.json, zapisuje llm2005/train.py) ===== -->
+  <div class="banner tcard hidden" id="tBanner"></div>
+  <section class="card tcard">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px">
+      <div>
+        <div class="sub" id="tModel">Model</div>
+        <div class="big" id="tStep">–</div>
+      </div>
+      <div class="pill" id="tState">–</div>
+    </div>
+    <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" id="tBar"><div id="tFill" style="width:0"></div></div>
+    <div class="sub" id="tBarNote" style="margin-top:6px"></div>
+    <div class="tiles" id="tTiles"></div>
+  </section>
+
+  <section class="card tcard">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px">
+      <h2>Loss (chyba modelu – čím menší, tím lépe)</h2>
+      <label class="chk"><input type="checkbox" id="tZoom" checked> přiblížit (bez prvních 5 % kroků)</label>
+    </div>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--s1)"></i>train loss (průměr za posledních 50 kroků)</span>
+      <span><i class="sw" style="background:var(--s2)"></i>val loss (data, která model nikdy neviděl)</span>
+    </div>
+    <div id="tLossChart"></div>
+  </section>
+
+  <section class="card half tcard">
+    <h2>Learning rate</h2>
+    <div id="tLrChart"></div>
+    <div class="sub" style="margin-top:6px">Rozjezd (warmup), pak pomalý pokles po kosinusovce až na 1/10.</div>
+  </section>
+
+  <section class="card half tcard">
+    <h2>Rychlost (tokenů/s)</h2>
+    <div id="tTpsChart"></div>
+    <div class="sub" style="margin-top:6px">Propady = evaluace a ukládání, nebo jiný program na GPU (např. hra).</div>
+  </section>
+
+  <section class="card tcard">
+    <h2>Ukázky textu podle kroku <span class="sub">(nejnovější nahoře; tučně = začátek, který jsme dali modelu)</span></h2>
+    <div id="tSamples"><p class="muted">Ukázky vzniknou při první evaluaci.</p></div>
+  </section>
+
+  <section class="card tcard">
+    <h2>Log tréninku</h2>
+    <pre class="log" id="tLog">–</pre>
+  </section>
+
   <section class="card hidden" id="cleanCard">
     <h2>Čištění dat <span class="sub" id="cleanWhen"></span></h2>
     <p class="sub" id="cleanNote"></p>
@@ -204,7 +262,8 @@ details summary { cursor: pointer; color: var(--ink-2); margin-top: 10px; min-he
 <script>
 "use strict";
 // Dvě dlouhé úlohy mají stejný formát stavu (llm2005/progress.py); přepínač v hlavičce vybírá, kterou ukázat.
-const JOBS = { tokenizer: "/progress/tokenizer-status.json", prepare: "/progress/prepare-status.json" };
+const JOBS = { tokenizer: "/progress/tokenizer-status.json", prepare: "/progress/prepare-status.json",
+               train: "/progress/train-status.json" };
 const REPORT_URL = "/progress/tokenizer-report.json";
 const EXTRA_URLS = { clean: "/progress/cleaning-report.json", compare: "/progress/tokenizer-compare.json",
                      check: "/progress/train-check.json" };
@@ -575,6 +634,139 @@ function drawReport(r, status) {
   }
 }
 
+// ---------- trénink modelu ----------
+// Obecný čárový graf: osa x = krok tréninku, víc řad, při najetí myší ukáže hodnoty u nejbližšího kroku.
+function lineChart(box, series, { yFmt = v => v.toFixed(2), label = "", H = 240, minY = null } = {}) {
+  box.innerHTML = "";
+  const W = 1000, L = 70, R = 14, T = 10, B = 28;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": label });
+  box.appendChild(svg);
+  const all = series.flatMap(s => s.points);
+  if (all.length < 2) { svg.appendChild(el("text", { x: W / 2, y: H / 2, "text-anchor": "middle" }, "Zatím málo dat…")); return; }
+  const xs = all.map(p => p.step), ys = all.map(p => p.y);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  let lo = minY != null ? minY : Math.min(...ys), hi = Math.max(...ys);
+  const pad = (hi - lo) * 0.06 || Math.abs(hi) * 0.1 || 1;
+  if (minY == null) lo -= pad;
+  hi += pad;
+  const x = s => L + (W - L - R) * (s - x0) / Math.max(1, x1 - x0);
+  const y = v => T + (H - T - B) * (hi - v) / (hi - lo);
+  for (let i = 0; i <= 4; i++) {
+    const v = lo + (hi - lo) * i / 4;
+    svg.appendChild(el("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: i ? "var(--grid)" : "var(--axis)" }));
+    svg.appendChild(el("text", { x: L - 6, y: y(v) + 4, "text-anchor": "end" }, yFmt(v)));
+  }
+  svg.appendChild(el("text", { x: L, y: H - 8 }, "krok " + nf.format(x0)));
+  svg.appendChild(el("text", { x: W - R, y: H - 8, "text-anchor": "end" }, "krok " + nf.format(x1)));
+  for (const s of series) {
+    if (!s.points.length) continue;
+    const d = s.points.map((p, i) => (i ? "L" : "M") + x(p.step).toFixed(1) + " " + y(p.y).toFixed(1)).join(" ");
+    svg.appendChild(el("path", { d, fill: "none", stroke: s.color, "stroke-width": 2, "stroke-linejoin": "round" }));
+    if (s.dots) for (const p of s.points)
+      svg.appendChild(el("circle", { cx: x(p.step), cy: y(p.y), r: 3.5, fill: s.color, stroke: "var(--surface)", "stroke-width": 1.5 }));
+  }
+  const cross = el("line", { y1: T, y2: H - B, stroke: "var(--ink-2)", "stroke-width": 1, visibility: "hidden" });
+  svg.appendChild(cross);
+  const hit = el("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent" });
+  svg.appendChild(hit);
+  hit.addEventListener("pointermove", ev => {
+    const r = svg.getBoundingClientRect();
+    const sx = x0 + (x1 - x0) * ((ev.clientX - r.left) * W / r.width - L) / (W - L - R);
+    let html = "", at = null;
+    for (const s of series) {
+      if (!s.points.length) continue;
+      let best = s.points[0];
+      for (const p of s.points) if (Math.abs(p.step - sx) < Math.abs(best.step - sx)) best = p;
+      if (at == null) at = best;
+      html += `<br><span style="color:${s.color}">●</span> ${esc(s.name)}: <b>${yFmt(best.y)}</b>` +
+        (best.step !== at.step ? ` <span style="opacity:.7">(krok ${nf.format(best.step)})</span>` : "");
+    }
+    cross.setAttribute("x1", x(at.step)); cross.setAttribute("x2", x(at.step)); cross.setAttribute("visibility", "visible");
+    showTip(ev, `krok ${nf.format(at.step)}` + (at.t != null ? ` · ${dur(at.t)} tréninku` : "") + html);
+  });
+  hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+}
+
+const lossFmt = v => v.toLocaleString("cs-CZ", { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+let lastTrain = null;
+function drawTrain(s) {
+  lastTrain = s;
+  const h = s.hparams || {}, m = s.model || {}, g = s.gpu, hist = s.history || {};
+  const age = (Date.now() - new Date(s.updated_at).getTime()) / 1000;
+  const alive = s.state === "running" && age < 30;
+  document.title = "LLM 2005 – trénink modelu " + (s.config || "");
+  document.querySelector("h1").textContent = "LLM 2005 – trénink modelu";
+  setConn(s.state !== "running" || alive, alive ? "živě" : (s.state === "running" ? `stav starý ${dur(age)} – trénink neběží?` : "spojeno"));
+  $("subtitle").textContent = `${s.title} · start ${new Date(s.started_at).toLocaleString("cs-CZ")} · aktualizace ${new Date(s.updated_at).toLocaleTimeString("cs-CZ")}`;
+  $("tModel").textContent = `Model ${s.config}: ${m.params_m} M parametrů · ${m.n_layer} vrstev · ${m.n_head} hlav · šířka ${m.n_embd} · kontext ${m.block_size} tokenů · slovník ${nf.format(m.vocab_size)}`;
+  $("tStep").textContent = `krok ${nf.format(s.step)} z ${nf.format(h.max_steps)}`;
+  const pct = h.max_steps ? 100 * s.step / h.max_steps : 0;
+  $("tFill").style.width = pct + "%";
+  $("tBar").setAttribute("aria-valuenow", pct.toFixed(1));
+  $("tBarNote").textContent = `${pct.toLocaleString("cs-CZ", { maximumFractionDigits: 1 })} % kroků · tento běh začal na kroku ${nf.format(s.start_step)}` +
+    (s.hours_limit ? ` · časový limit ${s.hours_limit} h (konec ${new Date(s.deadline_at).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })})` : "");
+  $("tState").textContent = alive ? "▶ běží" : { running: "■ neběží (poslední stav)", done: "✔ hotovo", stopped: "■ zastaveno (lze pokračovat)", error: "✖ chyba" }[s.state] || s.state;
+  const ck = s.checkpoint;
+  const tiles = [
+    ["Train loss", s.train_loss != null ? lossFmt(s.train_loss) : "–", "průměr za posledních 50 kroků"],
+    ["Val loss", s.val_loss != null ? lossFmt(s.val_loss) : "–", s.best_val != null ? "nejlepší " + lossFmt(s.best_val) : "při evaluaci"],
+    ["Learning rate", s.lr != null ? s.lr.toExponential(2) : "–", `max ${h.lr}, warmup ${nf.format(h.warmup_steps)} kroků`],
+    ["Rychlost", alive && s.tokens_per_s_live ? big(s.tokens_per_s_live) + " tok/s" : (s.tokens_per_s ? big(s.tokens_per_s) + " tok/s" : "–"),
+      s.tokens_per_s ? `za posledních 50 kroků: ${big(s.tokens_per_s)}` : ""],
+    ["Paměť GPU", g ? `${g.reserved_gb.toLocaleString("cs-CZ")} GB` : "–", g ? `špička ${g.peak_gb.toLocaleString("cs-CZ")} GB · celé GPU ${g.used_gb.toLocaleString("cs-CZ")} / ${g.total_gb.toLocaleString("cs-CZ")} GB` : ""],
+    ["Uplynulo", dur(s.elapsed_s), `tento běh · celkem trénink ${dur(s.train_seconds_total)}`],
+    ["Zbývá do limitu", s.state === "running" && alive && s.eta_deadline_s != null ? dur(s.eta_deadline_s) : "–", s.hours_limit ? `limit ${s.hours_limit} h` : "bez limitu"],
+    ["Do posledního kroku", s.eta_max_steps_s != null && alive ? "~" + dur(s.eta_max_steps_s) : "–", "odhad podle rychlosti"],
+    ["Prošlo tokenů", big(s.tokens_seen), `epocha ${(s.epoch || 0).toLocaleString("cs-CZ", { maximumFractionDigits: 3 })} (z ${big(s.train_tokens)} tokenů dat)`],
+    ["Checkpoint", ck ? "krok " + nf.format(ck.step) : "zatím není", ck ? `${new Date(ck.saved_at).toLocaleTimeString("cs-CZ")} · ${ck.path}` : ""],
+  ];
+  $("tTiles").innerHTML = tiles.map(([l, v, hint]) =>
+    `<div class="tile"><div class="label">${esc(l)}</div><div class="value">${esc(v)}</div><div class="hint">${esc(hint || "")}</div></div>`).join("");
+  const b = $("tBanner");
+  if (s.state === "error") { b.className = "banner error tcard"; b.textContent = "✖ Trénink skončil chybou: " + (s.error || "?"); }
+  else if (s.state === "running" && !alive) { b.className = "banner tcard"; b.textContent = "Trénink teď neběží (proces skončil bez zápisu stavu). Zobrazuji poslední stav. Spuštěním stejného příkazu bude pokračovat z checkpointu."; }
+  else if (s.state === "stopped") { b.className = "banner tcard"; b.textContent = `■ Trénink zastaven ${s.finished_at ? new Date(s.finished_at).toLocaleString("cs-CZ") : ""}. Stejný příkaz bude pokračovat z kroku ${nf.format(ck ? ck.step : s.step)}.`; }
+  else if (s.state === "done") { b.className = "banner tcard"; b.textContent = `✔ Trénink dokončen (${nf.format(s.step)} kroků).`; }
+  else b.className = "banner tcard hidden";
+
+  const tr = hist.train || [], va = hist.val || [];
+  const zoom = $("tZoom").checked, maxStep = Math.max(1, ...tr.map(p => p.step), ...va.map(p => p.step));
+  const keep = p => !zoom || p.step >= maxStep * 0.05;
+  lineChart($("tLossChart"), [
+    { name: "train loss", color: "var(--s1)", points: tr.filter(keep).map(p => ({ step: p.step, y: p.loss, t: p.t })) },
+    { name: "val loss", color: "var(--s2)", dots: true, points: va.filter(keep).map(p => ({ step: p.step, y: p.loss, t: p.t })) },
+  ], { yFmt: lossFmt, label: "Graf train a val loss podle kroku" });
+  lineChart($("tLrChart"), [{ name: "learning rate", color: "var(--s1)", points: tr.map(p => ({ step: p.step, y: p.lr, t: p.t })) }],
+    { yFmt: v => v.toExponential(1), label: "Learning rate podle kroku", H: 220, minY: 0 });
+  lineChart($("tTpsChart"), [{ name: "tokenů/s", color: "var(--s1)", points: tr.map(p => ({ step: p.step, y: p.tps, t: p.t })) }],
+    { yFmt: v => big(v), label: "Rychlost tréninku podle kroku", H: 220, minY: 0 });
+
+  const box = $("tSamples");
+  const stamp = JSON.stringify((s.samples || []).map(x => x.step));
+  if (box.dataset.stamp !== stamp) {
+    box.dataset.stamp = stamp;
+    box.innerHTML = "";
+    if (!(s.samples || []).length) box.innerHTML = '<p class="muted">Ukázky vzniknou při první evaluaci.</p>';
+    for (const e of s.samples || []) {
+      const d = document.createElement("div"); d.className = "sample";
+      const head = document.createElement("div");
+      head.innerHTML = `<b></b> <span class="sub"></span>`;
+      head.querySelector("b").textContent = "krok " + nf.format(e.step);
+      head.querySelector(".sub").textContent = `val loss ${lossFmt(e.val_loss)} · ${new Date(e.at).toLocaleString("cs-CZ")}`;
+      d.appendChild(head);
+      for (const it of e.items || []) {
+        const gen = document.createElement("div"); gen.className = "gen";
+        const pr = document.createElement("span"); pr.className = "prompt"; pr.textContent = it.prompt;
+        gen.append(pr, document.createTextNode(it.completion));
+        d.appendChild(gen);
+      }
+      box.appendChild(d);
+    }
+  }
+  $("tLog").textContent = (s.log || []).join("\n") || "–";
+}
+$("tZoom").addEventListener("change", () => { if (lastTrain) drawTrain(lastTrain); });
+
 // ---------- hlavní smyčka ----------
 function setConn(ok, text) {
   $("conn").innerHTML = `<span class="dot" style="background:${ok ? "var(--good)" : "var(--critical)"}"></span> `;
@@ -608,12 +800,19 @@ async function tick() {
       const both = {};
       for (const n of Object.keys(JOBS)) both[n] = await fetchStatus(n);
       const cand = Object.entries(both).filter(([, v]) => v);
-      const running = cand.find(([, v]) => v.state === "running");
+      // "běží" = stav running a čerstvě aktualizovaný (natvrdo ukončená úloha nechá running navždy)
+      const running = cand.find(([, v]) => v.state === "running" && Date.now() - new Date(v.updated_at).getTime() < 60000);
       const pick = running || cand.sort((a, b) => new Date(b[1].updated_at) - new Date(a[1].updated_at))[0];
       if (pick) { job = pick[0]; s = pick[1]; }
       markJobButtons();
     } else {
       s = await fetchStatus(job);
+    }
+    document.body.classList.toggle("train-mode", job === "train");
+    if (job === "train") {
+      if (s) drawTrain(s);
+      else { setConn(true, "spojeno"); $("subtitle").textContent = "Trénink ještě nezačal (data/progress/train-status.json zatím neexistuje)."; }
+      return;
     }
     loadExtras();
     if (!s) { setConn(true, "spojeno"); $("subtitle").textContent = "Úloha ještě nezačala (stav zatím neexistuje)."; loadReport(null); return; }

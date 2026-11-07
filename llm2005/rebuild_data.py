@@ -33,7 +33,8 @@ def train_check(config: str, data_dir: Path, progress_dir: Path, hours: float, m
     """Spustí krátký trénink a z výpisu vytáhne loss na začátku a na konci."""
     out_dir = Path("checkpoints") / f"tiny-check-{time.strftime('%Y%m%d-%H%M%S')}"
     cmd = [sys.executable, "-m", "llm2005.train", "--config", config, "--data-dir", str(data_dir),
-           "--hours", str(hours), "--max-steps", str(max_steps), "--out-dir", str(out_dir)]
+           "--hours", str(hours), "--max-steps", str(max_steps), "--out-dir", str(out_dir),
+           "--no-status"]  # nepřepisovat stav hlavního tréninku v dashboardu
     print("Spouštím:", " ".join(cmd), flush=True)
     t0 = time.time()
     losses, vals, lines = [], [], []

@@ -42,6 +42,18 @@ def process_memory_gb() -> float | None:
     return None
 
 
+def write_json_atomic(path: Path, data: dict) -> None:
+    """Zapíše JSON nejdřív do .tmp a pak ho přejmenuje – čtenář nikdy neuvidí půlku souboru."""
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    for _ in range(10):  # na Windows může soubor chvíli držet čtenář (server)
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            time.sleep(0.1)
+
+
 class Progress:
     """Stav úlohy rozdělené na fáze. Každá fáze má váhu (podíl na celkových procentech)."""
 
@@ -223,14 +235,7 @@ class Progress:
             if self.state == "running":
                 self._update_rate()
             data = self.snapshot()
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-        for _ in range(10):  # na Windows může soubor chvíli držet čtenář (server)
-            try:
-                os.replace(tmp, self.path)
-                return
-            except PermissionError:
-                time.sleep(0.1)
+        write_json_atomic(self.path, data)
 
     def _loop(self) -> None:
         while not self._stop.wait(self.interval):

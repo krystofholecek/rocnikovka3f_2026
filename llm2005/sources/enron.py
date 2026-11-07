@@ -27,6 +27,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Iterator
 
+from ..datecheck import is_placeholder
 from ..document import Document
 from ._io import fetch
 
@@ -40,13 +41,18 @@ QUOTE_MARKERS = re.compile(
 
 
 def parse_date(value: str | None) -> str:
-    """'Mon, 14 May 2001 16:39:00 -0700 (PDT)' -> '2001-05-14'. Nejde-li přečíst -> ''."""
+    """'Mon, 14 May 2001 16:39:00 -0700 (PDT)' -> '2001-05-14'. Nejde-li přečíst -> ''.
+
+    'Mon, 31 Dec 1979 16:00:00 -0800 (PST)' je nulové datum Outlooku (1. 1. 1980 0:00 UTC),
+    skutečné datum e-mail nemá -> '' (ingest ho odmítne jako no_date).
+    """
     if not value:
         return ""
     try:
-        return parsedate_to_datetime(value).date().isoformat()
+        iso = parsedate_to_datetime(value).date().isoformat()
     except (TypeError, ValueError, IndexError, OverflowError):
         return ""
+    return "" if is_placeholder(iso) else iso
 
 
 def clean_body(body: str) -> str:

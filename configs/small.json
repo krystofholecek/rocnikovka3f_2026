@@ -1,7 +1,9 @@
 {
   "name": "small",
-  "_popis": "Pokusný model ~25 M parametrů. Na GPU řádově hodiny.",
+  "_popis": "Pokusný model ~23 M parametrů. Na RTX 3060 ~80 tis. tokenů/s (měřeno), 28 000 kroků ≈ 1,8 mld. tokenů ≈ 6-7 h (odhad).",
+  "_batch": "batch 16 × 512 zabere ~5 GB GPU (batch 32 bral ~9,3 GB a s ostatními programy přetékal do sdílené paměti); grad_accum 8 -> stále 65 536 tokenů na krok.",
+  "_setrnost": "cpu_threads = kolik CPU vláken smí PyTorch použít; max_vram_gb = strop paměti GPU pro trénink.",
   "model": {"vocab_size": 32000, "block_size": 512, "n_layer": 6, "n_head": 6, "n_embd": 384},
-  "train": {"batch_size": 32, "grad_accum": 4, "lr": 0.0006, "warmup_steps": 500, "max_steps": 10000,
-            "log_every": 50, "eval_every": 500, "eval_batches": 50}
+  "train": {"batch_size": 16, "grad_accum": 8, "lr": 0.0006, "warmup_steps": 500, "max_steps": 28000,
+            "log_every": 50, "eval_every": 500, "eval_batches": 50, "cpu_threads": 4, "max_vram_gb": 8}
 }

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChronosLLM – LLM 2005</title>
+<meta name="description" content="Jazykový model natrénovaný od nuly jen na textech do 31. 12. 2005. Projekt ve vývoji.">
+<style>
+  :root { --bg:#0f1115; --fg:#e8e9ec; --muted:#9aa0ab; --accent:#7cc4ff; --card:#171a21; --line:#262b35; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f7f7f5; --fg:#16181d; --muted:#5d6470; --accent:#0a66c2; --card:#fff; --line:#e3e3df; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         background:var(--bg); color:var(--fg);
+         font:17px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; padding:24px; }
+  main { max-width:620px; width:100%; }
+  .tag { display:inline-block; font-size:13px; letter-spacing:.08em; text-transform:uppercase;
+         color:var(--accent); border:1px solid var(--line); border-radius:999px; padding:4px 12px; }
+  h1 { font-size:clamp(34px,7vw,52px); line-height:1.1; margin:18px 0 8px; letter-spacing:-.02em; }
+  h1 span { color:var(--accent); }
+  p { margin:0 0 14px; }
+  .muted { color:var(--muted); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px; margin:26px 0; }
+  .card p:last-child { margin:0; }
+  a.btn { display:inline-block; padding:11px 18px; border-radius:10px; background:var(--accent);
+          color:#06121f; font-weight:600; text-decoration:none; }
+  a.btn:hover { opacity:.9; }
+  footer { margin-top:34px; font-size:14px; color:var(--muted); }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <span class="tag">Ve vývoji · Work in progress</span>
+  <h1>Chronos<span>LLM</span></h1>
+  <p class="muted">Jazykový model natrénovaný od nuly jen na textech vzniklých do 31. 12. 2005. Nic pozdějšího nezná.</p>
+
+  <div class="card">
+    <p><strong>Projekt je teprve ve vývoji.</strong> Webový chat zatím není k dispozici. Stav prací, data, kód a plán můžete sledovat na našem GitHubu.</p>
+    <p class="muted" style="margin-top:10px">A language model trained from scratch only on texts written up to 31 December 2005. The project is under development; follow progress on GitHub.</p>
+  </div>
+
+  <p><a class="btn" href="/postup/">Jak to funguje, krok za krokem →</a></p>
+  <p><a class="btn" href="https://github.com/krystofholecek/rocnikovka3f_2026">Sledovat na GitHubu →</a>
+     <a class="btn" style="margin-left:8px;background:transparent;color:var(--accent);border:1px solid var(--accent)" href="/tokenizer/">Tokenizer Lab (jen pro tým) →</a></p>
+
+  <footer>Ročníková práce 3.F 2026 · Holeček, Gregor, Milý</footer>
+</main>
+</body>
+</html>

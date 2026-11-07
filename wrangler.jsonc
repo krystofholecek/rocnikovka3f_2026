@@ -1,0 +1,20 @@
+// Nasazení statického webu chronosllm.com přes Cloudflare Workers (jen statické soubory, bez kódu Workeru).
+// Obsah složky dist/ vytváří: python scripts/build_site.py
+// Dokumentace: https://developers.cloudflare.com/workers/static-assets/
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  // Musí se shodovat se jménem Workeru v Cloudflare, jinak Workers Builds selže.
+  "name": "chronosllm",
+  "compatibility_date": "2026-11-07",
+  // Jen statické soubory: "main" (kód Workeru) není potřeba.
+  // /postup/ a /tokenizer/ se obslouží z index.html ve složce (výchozí html_handling "auto-trailing-slash").
+  "assets": {
+    "directory": "./dist"
+  },
+  // Adresa *.workers.dev zůstává vypnutá – web chrání Cloudflare Access jen na vlastních doménách.
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "chronosllm.com", "custom_domain": true },
+    { "pattern": "www.chronosllm.com", "custom_domain": true }
+  ]
+}

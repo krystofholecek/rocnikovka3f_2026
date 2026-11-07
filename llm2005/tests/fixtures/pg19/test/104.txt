@@ -1,0 +1,3 @@
+A BOOK MISSING FROM METADATA
+
+This synthetic book is not listed in metadata.csv at all, so we do not know when it was published. Without a date it must not get into the database and it should end up in the rejected table, just like the book without a year.

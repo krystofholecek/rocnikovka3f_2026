@@ -54,7 +54,7 @@ def main() -> None:
             p.error("chybí cesta ke vstupnímu souboru")
         print(ingest(SOURCES[a.source](a.path), db))
     for source, n, chars, dmin, dmax in db.stats():
-        print(f"{source:<12} {n:>9} dokumentů  {chars or 0:>14,} znaků  {dmin} až {dmax}")
+        print(f"{source:<15} {n:>9} dokumentů  {chars or 0:>14,} znaků  {dmin} až {dmax}")
     db.close()
 
 

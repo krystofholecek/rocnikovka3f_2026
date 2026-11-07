@@ -1,0 +1,19 @@
+# Do obrazu patří jen kód chatu (viz Dockerfile). Data a modely se připojují jako svazek.
+.git
+.github
+.venv
+venv
+.env
+data
+checkpoints
+dist
+web
+docs
+scripts
+configs
+node_modules
+**/__pycache__
+**/tests
+*.pt
+*.bin
+*.sqlite

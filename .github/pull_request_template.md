@@ -4,7 +4,7 @@
 Closes #
 
 ## Checklist
-- [ ] `pytest llm2005` prochází (a `python manage.py test`, pokud se mění web)
+- [ ] `pytest` a `ruff check .` prochází
 - [ ] Žádná data ani checkpointy v commitu
 - [ ] Žádné tajné údaje ani `.env` v commitu
-- [ ] Nové závislosti jsou v `requirements.txt`
+- [ ] Nové závislosti jsou ve správném souboru v `requirements/` (train / chat / dev)

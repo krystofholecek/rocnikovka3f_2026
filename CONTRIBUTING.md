@@ -18,7 +18,8 @@ git checkout -b feature/prihlaseni
 ## Pull requesty
 - PR do `main`, v popisu odkaz na issue (`Closes #12`).
 - Potřeba aspoň 1 schválení od někoho jiného.
-- Před PR spusť testy: `pytest llm2005` (model) a `python manage.py test` (web).
+- Před PR spusť testy a kontrolu stylu: `pytest` (model i chat) a `ruff check .`
+  (vše nainstaluješ přes `pip install -r requirements/dev.txt`).
 - CI na GitHubu spouští testy automaticky.
 
 ## Commity

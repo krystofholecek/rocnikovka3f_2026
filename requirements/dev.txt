@@ -1,0 +1,5 @@
+# Vývoj: všechno pro trénink i chat + testy a kontrola stylu.
+-r train.txt
+-r chat.txt
+pytest>=8
+ruff>=0.15

@@ -1,0 +1,6 @@
+# Trénink modelu a zpracování dat (llm2005/).
+# PyTorch s NVIDIA GPU instaluj podle https://pytorch.org/get-started/locally/ (verze s CUDA),
+# na počítači bez GPU stačí: pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch>=2.4
+numpy>=1.26
+tokenizers>=0.20

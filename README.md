@@ -97,9 +97,10 @@ cd rocnikovka3f_2026
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 # PyTorch s NVIDIA GPU: https://pytorch.org/get-started/locally/  (verze s CUDA)
-pip install -r requirements-llm.txt
+pip install -r requirements/dev.txt   # trénink + chat + testy (jen trénink: requirements/train.txt)
 
-pytest llm2005                     # testy
+pytest                             # testy
+ruff check .                       # kontrola stylu
 ```
 
 ## Struktura repozitáře
@@ -115,7 +116,8 @@ llm2005/          model a celý řetězec zpracování dat
 ├── model.py, train.py, sample.py, benchmark.py   GPT, trénink, generování, měření rychlosti
 └── tests/        testy
 configs/          velikosti modelu a nastavení tréninku
-config/ core/ templates/ static/   kostra webového chatu (Django)
+chat/                              backend chatu (Django API nad modelem)
+requirements/                      závislosti: train.txt, chat.txt, dev.txt
 data/, checkpoints/                data a natrénované modely (nejsou v gitu, jsou velké)
 web/landing/, web/postup/          úvodní stránka a postup krok za krokem (chronosllm.com)
 web/tokenizer-lab/                 samostatný doprovodný web (viz níže)

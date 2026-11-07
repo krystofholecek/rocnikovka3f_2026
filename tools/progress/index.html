@@ -691,7 +691,7 @@ const lossFmt = v => v.toLocaleString("cs-CZ", { minimumFractionDigits: 2, maxim
 let lastTrain = null;
 function drawTrain(s) {
   lastTrain = s;
-  const h = s.hparams || {}, m = s.model || {}, g = s.gpu, hist = s.history || {};
+  const h = s.hparams || {}, m = s.model || {}, g = s.gpu, smi = s.gpu_smi, hist = s.history || {};
   const age = (Date.now() - new Date(s.updated_at).getTime()) / 1000;
   const alive = s.state === "running" && age < 30;
   document.title = "LLM 2005 – trénink modelu " + (s.config || "");
@@ -714,6 +714,10 @@ function drawTrain(s) {
     ["Rychlost", alive && s.tokens_per_s_live ? big(s.tokens_per_s_live) + " tok/s" : (s.tokens_per_s ? big(s.tokens_per_s) + " tok/s" : "–"),
       s.tokens_per_s ? `za posledních 50 kroků: ${big(s.tokens_per_s)}` : ""],
     ["Paměť GPU", g ? `${g.reserved_gb.toLocaleString("cs-CZ")} GB` : "–", g ? `špička ${g.peak_gb.toLocaleString("cs-CZ")} GB · celé GPU ${g.used_gb.toLocaleString("cs-CZ")} / ${g.total_gb.toLocaleString("cs-CZ")} GB` : ""],
+    ["GPU (nvidia-smi)", smi && smi.util_pct != null ? `${smi.util_pct} % · ${smi.temp_c ?? "?"} °C` : "–",
+      smi ? `VRAM ${(smi.mem_used_gb ?? 0).toLocaleString("cs-CZ")} / ${(smi.mem_total_gb ?? 0).toLocaleString("cs-CZ")} GB` +
+        (smi.power_w != null ? ` · ${Math.round(smi.power_w)} W` : "") +
+        (s.priority ? ` · priorita ${s.priority}, ${s.cpu_threads} vl.` : "") : ""],
     ["Uplynulo", dur(s.elapsed_s), `tento běh · celkem trénink ${dur(s.train_seconds_total)}`],
     ["Zbývá do limitu", s.state === "running" && alive && s.eta_deadline_s != null ? dur(s.eta_deadline_s) : "–", s.hours_limit ? `limit ${s.hours_limit} h` : "bez limitu"],
     ["Do posledního kroku", s.eta_max_steps_s != null && alive ? "~" + dur(s.eta_max_steps_s) : "–", "odhad podle rychlosti"],
@@ -727,6 +731,7 @@ function drawTrain(s) {
   else if (s.state === "running" && !alive) { b.className = "banner tcard"; b.textContent = "Trénink teď neběží (proces skončil bez zápisu stavu). Zobrazuji poslední stav. Spuštěním stejného příkazu bude pokračovat z checkpointu."; }
   else if (s.state === "stopped") { b.className = "banner tcard"; b.textContent = `■ Trénink zastaven ${s.finished_at ? new Date(s.finished_at).toLocaleString("cs-CZ") : ""}. Stejný příkaz bude pokračovat z kroku ${nf.format(ck ? ck.step : s.step)}.`; }
   else if (s.state === "done") { b.className = "banner tcard"; b.textContent = `✔ Trénink dokončen (${nf.format(s.step)} kroků).`; }
+  else if (alive && s.vram_warning) { b.className = "banner error tcard"; b.textContent = "⚠ " + s.vram_warning; }
   else b.className = "banner tcard hidden";
 
   const tr = hist.train || [], va = hist.val || [];

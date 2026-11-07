@@ -31,8 +31,23 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from .gpu_info import lower_priority, nvidia_smi
 from .model import GPT, GPTConfig
 from .progress import write_json_atomic
+
+# Když je na GPU volno méně než tolik GB, hrozí přetečení do sdílené paměti (viz docs/trenink-rychlost.md).
+VRAM_RESERVE_GB = 0.5
+
+
+def vram_warning(smi: dict | None) -> str | None:
+    """Varování, když je GPU skoro plné (Windows pak začne odkládat do běžné RAM a vše se zpomalí)."""
+    if not smi or smi.get("mem_used_gb") is None or not smi.get("mem_total_gb"):
+        return None
+    free = smi["mem_total_gb"] - smi["mem_used_gb"]
+    if free < VRAM_RESERVE_GB:
+        return (f"GPU je skoro plné ({smi['mem_used_gb']} / {smi['mem_total_gb']} GB). Hrozí přetečení "
+                "do sdílené paměti a velké zpomalení – zavři programy, které používají GPU, nebo zmenši batch_size.")
+    return None
 
 # Začátky vět, na kterých při každé evaluaci ukážeme, co model umí.
 PROMPTS = ["The Internet is", "In 2005, the most popular", "Dear John,"]
@@ -49,6 +64,17 @@ def pick_device() -> str:
     if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
         return "mps"
     return "cpu"
+
+
+def make_autocast(device: str):
+    """Smíšená přesnost (AMP): na GPU počítá v bf16 (nebo fp16), což je ~2× rychlejší a šetří paměť.
+
+    Vrací (autocast kontext, dtype). Na CPU nic nemění.
+    """
+    if device != "cuda":
+        return contextlib.nullcontext(), torch.float32
+    dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    return torch.autocast("cuda", dtype=dtype), dtype
 
 
 def _iso(ts: float | None = None) -> str:
@@ -147,6 +173,7 @@ class TrainStatus:
         return self.train_seconds_before + (time.time() - self.started)
 
     def snapshot(self) -> dict:
+        smi = nvidia_smi() if self.data.get("device") == "cuda" else None  # mimo zámek (trvá ~0,1 s)
         with self.lock:
             now = time.time()
             step = self.data.get("step", 0)
@@ -166,6 +193,8 @@ class TrainStatus:
             left = d["hparams"]["max_steps"] - step
             d["eta_max_steps_s"] = round(left * d["hparams"]["tokens_per_step"] / rate) if rate > 0 else None
             d["gpu"] = gpu_memory()
+            d["gpu_smi"] = smi  # vytížení %, VRAM celého GPU, teplota, příkon
+            d["vram_warning"] = vram_warning(smi)
             d["log"] = list(self.logs)
             return d
 
@@ -226,12 +255,19 @@ def main() -> None:
     p.add_argument("--tokenizer", default="data/tokenizer.json", help="jen pro ukázky textu při evaluaci")
     p.add_argument("--status", default="data/progress/train-status.json", help="stav pro dashboard")
     p.add_argument("--no-status", action="store_true", help="nezapisovat stav (krátké testy)")
+    p.add_argument("--priority", choices=["low", "normal"], default="low",
+                   help="low = nižší priorita procesu, ať je počítač při tréninku použitelný")
     a = p.parse_args()
 
     cfg = load_config(a.config)
     t = cfg["train"]
     if a.max_steps:
         t["max_steps"] = a.max_steps
+
+    # Šetrnost k počítači: nižší priorita (platí pro celý proces včetně načítání dat)
+    # a omezený počet CPU vláken (GPU trénink jich moc nepotřebuje).
+    priority = lower_priority() if a.priority == "low" else "Normal"
+    torch.set_num_threads(int(t.get("cpu_threads", 4)))
     out = Path(a.out_dir) if a.out_dir else Path(cfg.get("out_dir", "checkpoints")) / cfg["name"]
     out.mkdir(parents=True, exist_ok=True)
     ckpt_path = out / "ckpt.pt"
@@ -239,12 +275,19 @@ def main() -> None:
     device = pick_device()
     torch.manual_seed(2005)
 
-    use_amp = device == "cuda"
-    amp_dtype = torch.bfloat16 if use_amp and torch.cuda.is_bf16_supported() else torch.float16
-    autocast = torch.autocast("cuda", dtype=amp_dtype) if use_amp else contextlib.nullcontext()
-    scaler = torch.amp.GradScaler("cuda", enabled=use_amp and amp_dtype == torch.float16)
+    autocast, amp_dtype = make_autocast(device)
+    scaler = torch.amp.GradScaler("cuda", enabled=amp_dtype == torch.float16)
+    vram_cap = None
     if device == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
+        # Strop paměti pro PyTorch: radši chyba "out of memory" než tiché přetečení
+        # do sdílené paměti GPU, které trénink zpomalí desetkrát a víc a sekne celý počítač.
+        if t.get("max_vram_gb"):
+            total = torch.cuda.get_device_properties(0).total_memory / 2**30
+            vram_cap = min(float(t["max_vram_gb"]), total)
+            torch.cuda.set_per_process_memory_fraction(vram_cap / total)
+        if w := vram_warning(nvidia_smi()):
+            print("POZOR: " + w, flush=True)
 
     model = GPT(GPTConfig(**cfg["model"])).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=t["lr"], betas=(0.9, 0.95), weight_decay=0.1)
@@ -256,7 +299,10 @@ def main() -> None:
         step, best_val = ck["step"], ck.get("best_val", best_val)
         train_seconds_before = ck.get("train_seconds", 0.0)
         print(f"Pokračuji z kroku {step}")
-    print(f"Zařízení: {device}, parametrů: {model.num_params() / 1e6:.1f} M")
+    print(f"Zařízení: {device}, parametrů: {model.num_params() / 1e6:.1f} M, "
+          f"AMP: {str(amp_dtype).removeprefix('torch.')}, priorita: {priority}, "
+          f"CPU vláken: {torch.get_num_threads()}, strop VRAM: {f'{vram_cap:.1f} GB' if vram_cap else 'není'}",
+          flush=True)
 
     tok = None
     if Path(a.tokenizer).exists():
@@ -274,6 +320,7 @@ def main() -> None:
     status = TrainStatus(status_path, {
         "kind": "train", "title": f"Trénink modelu {cfg['name']}", "config": cfg["name"],
         "config_path": a.config, "state": "running", "error": None, "device": device,
+        "priority": priority, "cpu_threads": torch.get_num_threads(), "max_vram_gb": vram_cap,
         "gpu_name": torch.cuda.get_device_name(0) if device == "cuda" else None,
         "model": {**cfg["model"], "params_m": round(model.num_params() / 1e6, 1)},
         "hparams": {**{k: t[k] for k in ("batch_size", "grad_accum", "lr", "warmup_steps", "max_steps", "eval_every")},

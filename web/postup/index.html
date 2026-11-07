@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jak vzniká ChronosLLM – krok za krokem</title>
+<meta name="description" content="Jak se od nuly staví jazykový model, který zná svět jen do roku 2005. Vysvětleno krok za krokem, jednoduše i podrobně.">
+<style>
+  :root{
+    --bg:#f7f7f4; --fg:#17191e; --muted:#5b616c; --line:#e2e2dc; --card:#ffffff;
+    --accent:#0a66c2; --accent-soft:#e6f0fa; --ok:#1d7a46; --warn:#a15c00;
+    --t1:#d9ecff; --t2:#ffe3cc; --t3:#dff5e3; --t4:#f3e1ff; --t5:#fff4bf;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0f1115; --fg:#e8e9ec; --muted:#9aa0ab; --line:#262b35; --card:#171a21;
+      --accent:#7cc4ff; --accent-soft:#16283a; --ok:#5fd394; --warn:#f0b35a;
+      --t1:#1d3550; --t2:#4a3220; --t3:#1f3d2a; --t4:#3a2550; --t5:#4a4220;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0f1115; --fg:#e8e9ec; --muted:#9aa0ab; --line:#262b35; --card:#171a21;
+    --accent:#7cc4ff; --accent-soft:#16283a; --ok:#5fd394; --warn:#f0b35a;
+    --t1:#1d3550; --t2:#4a3220; --t3:#1f3d2a; --t4:#3a2550; --t5:#4a4220;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  a{color:var(--accent)}
+  .wrap{max-width:820px;margin:0 auto;padding:0 16px}
+  header.top{border-bottom:1px solid var(--line);background:var(--card)}
+  header.top .wrap{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px}
+  .brand{font-weight:700;text-decoration:none;color:var(--fg)}
+  .brand span{color:var(--accent)}
+  .hero{padding:48px 0 24px}
+  .hero h1{font-size:clamp(30px,6vw,46px);line-height:1.12;letter-spacing:-.02em;margin:0 0 12px}
+  .hero p{color:var(--muted);margin:0 0 8px;font-size:18px}
+  .switch{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:4px;background:var(--card);margin-top:18px}
+  .switch button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:15px;padding:8px 16px;border-radius:999px;cursor:pointer}
+  .switch button[aria-pressed="true"]{background:var(--accent);color:#fff}
+  .note{font-size:14px;color:var(--muted);margin-top:8px}
+  nav.toc{margin:24px 0 8px;padding:16px 18px;background:var(--card);border:1px solid var(--line);border-radius:14px}
+  nav.toc ol{margin:0;padding-left:22px;columns:2;column-gap:28px}
+  nav.toc li{margin:2px 0;break-inside:avoid}
+  @media (max-width:600px){nav.toc ol{columns:1}}
+  section.step{margin:36px 0;padding:24px 22px;background:var(--card);border:1px solid var(--line);border-radius:16px}
+  .num{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:var(--accent);color:#fff;font-weight:700;margin-right:10px;flex:none}
+  :root[data-theme="dark"] .num{color:#06121f}
+  @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .num{color:#06121f}}
+  section.step h2{display:flex;align-items:center;font-size:24px;margin:0 0 12px;line-height:1.25}
+  .simple p,.deep p{margin:0 0 12px}
+  .simple{font-size:18px}
+  .deep{border-left:3px solid var(--accent);padding-left:14px;margin-top:14px}
+  .deep .label{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);font-weight:700;margin-bottom:6px}
+  body[data-level="simple"] .deep{display:none}
+  .analogy{background:var(--accent-soft);border-radius:12px;padding:12px 14px;margin:12px 0;font-size:16px}
+  .analogy b{color:var(--accent)}
+  .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0 4px}
+  .fact{border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .fact .v{font-size:22px;font-weight:700;line-height:1.2}
+  .fact .k{font-size:13px;color:var(--muted)}
+  table{width:100%;border-collapse:collapse;font-size:15px;margin:10px 0}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600}
+  td.n{text-align:right;white-space:nowrap}
+  .scroll{overflow-x:auto}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em;background:var(--accent-soft);padding:1px 5px;border-radius:5px}
+  .tok{display:flex;flex-wrap:wrap;gap:4px;margin:10px 0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:15px}
+  .tok span{padding:3px 6px;border-radius:6px;white-space:pre}
+  .tok span:nth-child(5n+1){background:var(--t1)} .tok span:nth-child(5n+2){background:var(--t2)}
+  .tok span:nth-child(5n+3){background:var(--t3)} .tok span:nth-child(5n+4){background:var(--t4)}
+  .tok span:nth-child(5n+5){background:var(--t5)}
+  .ids{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;color:var(--muted);word-break:break-word}
+  .flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:14px 0}
+  .flow .b{border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:14px;background:var(--bg)}
+  .flow .a{color:var(--muted)}
+  .status{display:inline-block;font-size:13px;font-weight:600;border-radius:999px;padding:2px 10px;margin-left:8px;vertical-align:middle}
+  .done{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
+  .now{background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn)}
+  .todo{background:var(--accent-soft);color:var(--accent)}
+  .loss{width:100%;height:auto;margin:8px 0}
+  .loss .ax{stroke:var(--line)} .loss .ln{stroke:var(--accent);fill:none;stroke-width:3}
+  .loss text{fill:var(--muted);font-size:12px;font-family:system-ui,sans-serif}
+  footer{color:var(--muted);font-size:14px;padding:30px 0 50px;text-align:center}
+  .theme{border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:10px;padding:6px 10px;font:inherit;font-size:14px;cursor:pointer}
+</style>
+</head>
+<body data-level="simple">
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/">Chronos<span>LLM</span></a>
+    <div style="display:flex;gap:10px;align-items:center">
+      <a href="https://github.com/krystofholecek/rocnikovka3f_2026" style="font-size:15px">GitHub</a>
+      <button class="theme" id="theme" type="button" aria-label="Přepnout světlý a tmavý režim">◐</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="hero">
+    <h1>Jak vzniká umělá inteligence, která zná svět jen do roku 2005</h1>
+    <p>Stavíme vlastní jazykový model (něco jako malý ChatGPT) úplně od nuly. Tady je celý postup krok za krokem.</p>
+    <p>Vyber si, jak podrobně to chceš vysvětlit:</p>
+    <div class="switch" role="group" aria-label="Úroveň vysvětlení">
+      <button type="button" data-level="simple" aria-pressed="true">Jednoduše</button>
+      <button type="button" data-level="deep" aria-pressed="false">Podrobně (pro techniky)</button>
+    </div>
+    <p class="note">Režim „Podrobně“ přidá ke každému kroku technické detaily, čísla a pojmy.</p>
+  </div>
+
+  <nav class="toc" aria-label="Obsah">
+    <ol>
+      <li><a href="#k1">O co jde</a></li>
+      <li><a href="#k2">Sbíráme texty</a></li>
+      <li><a href="#k3">Hlídáme datum</a></li>
+      <li><a href="#k4">Uklízíme data</a></li>
+      <li><a href="#k5">Mícháme zdroje</a></li>
+      <li><a href="#k6">Tokenizace: text na čísla</a></li>
+      <li><a href="#k7">Příprava trénovacích dat</a></li>
+      <li><a href="#k8">Trénink modelu</a></li>
+      <li><a href="#k9">Jak poznáme, že se učí</a></li>
+      <li><a href="#k10">Chat na webu</a></li>
+    </ol>
+  </nav>
+
+  <section class="step" id="k1">
+    <h2><span class="num">1</span>O co jde</h2>
+    <div class="simple">
+      <p>Jazykový model je program, který umí pokračovat v textu. Dáš mu začátek věty a on hádá, jak by mohla pokračovat. Když to umí dobře, dá se s ním povídat.</p>
+      <p>Náš model se bude učit <b>jen z textů napsaných do 31. 12. 2005</b>. Nebude tedy znát iPhone, YouTube hity, Bitcoin, covid ani ChatGPT. Bude „žít“ v roce 2005.</p>
+      <div class="analogy"><b>Přirovnání:</b> Představ si člověka, který v roce 2005 usnul a probudil se dnes. Ví spoustu věcí, ale o všem po roce 2005 nemá ani tušení. Takového „spáče“ stavíme.</div>
+    </div>
+    <div class="deep">
+      <div class="label">Podrobně</div>
+      <p>Architektura je GPT, tedy decoder-only Transformer. Model se učí úlohu <i>next-token prediction</i>: z posloupnosti tokenů předpovídá pravděpodobnost dalšího tokenu. Nepoužíváme žádné předtrénované váhy (GPT-2, Llama…), všechno trénujeme od náhodné inicializace, jinak by model věděl o věcech po roce 2005.</p>
+      <p>Plánované velikosti: <code>tiny</code> (~4 M parametrů, test), <code>small</code> (~23 M), <code>base</code> (~125 M, velikost GPT-2 small).</p>
+    </div>
+  </section>
+
+  <section class="step" id="k2">
+    <h2><span class="num">2</span>Sbíráme texty <span class="status done">hotovo</span></h2>
+    <div class="simple">
+      <p>Model se učí čtením. Potřebuje toho přečíst opravdu hodně, miliardy slov. Proto jsme stáhli velké veřejné archivy textů, které vznikly do roku 2005.</p>
+      <div class="facts">
+        <div class="fact"><div class="v">≈ 3,6 mil.</div><div class="k">dokumentů</div></div>
+        <div class="fact"><div class="v">≈ 20 mld.</div><div class="k">znaků textu</div></div>
+        <div class="fact"><div class="v">≈ 5 mld.</div><div class="k">tokenů (odhad)</div></div>
+      </div>
+      <p>Pro představu: 20 miliard znaků je zhruba jako 10 000 tlustých knih nebo celý život nepřetržitého čtení.</p>
+    </div>
+    <div class="deep">
+      <div class="label">Podrobně – zdroje</div>
+      <div class="scroll"><table>
+        <thead><tr><th>Zdroj</th><th>Co to je</th><th class="n">Znaků</th><th>Období</th></tr></thead>
+        <tbody>
+          <tr><td>Wikipedie – články</td><td>stav článků k 31. 12. 2005 z archivu revizí</td><td class="n">1,95 mld.</td><td>2003–2005</td></tr>
+          <tr><td>Wikipedie – diskuze</td><td>debaty editorů, přirozená řeč</td><td class="n">0,26 mld.</td><td>2002–2005</td></tr>
+          <tr><td>Knihy (Project Gutenberg, PG-19)</td><td>staré knihy, volné dílo</td><td class="n">11,48 mld.</td><td>do 1918</td></tr>
+          <tr><td>Usenet (UTZOO)</td><td>internetové diskuze, „fóra“ 80. let</td><td class="n">2,19 mld.</td><td>1981–1991</td></tr>
+          <tr><td>Blogy</td><td>osobní blogy</td><td class="n">0,72 mld.</td><td>1999–2005</td></tr>
+          <tr><td>E-maily Enron</td><td>firemní e-maily zveřejněné při vyšetřování</td><td class="n">0,29 mld.</td><td>1999–2002</td></tr>
+          <tr><td>Soudní rozhodnutí USA</td><td>CourtListener</td><td class="n">3,55 mld.</td><td>1980–2005</td></tr>
+          <tr><td>Ostatní</td><td>Wikisource, Wikinews, Wikibooks, Wikiquote, arXiv</td><td class="n">0,04 mld.</td><td>1991–2005</td></tr>
+        </tbody>
+      </table></div>
+      <p>Každý zdroj má vlastní parser, který převede surový formát (XML dump, archivy Usenetu, CSV z PostgreSQL…) na jednotný dokument s polí <code>source</code>, <code>source_id</code>, <code>date</code>, <code>text</code>. Všechno se ukládá do SQLite databáze (~22 GB).</p>
+    </div>
+  </section>
+
+  <section class="step" id="k3">
+    <h2><span class="num">3</span>Hlídáme datum <span class="status done">hotovo</span></h2>
+    <div class="simple">
+      <p>Tohle je nejdůležitější pravidlo celého projektu: <b>každý text musí mít datum a to musí být nejpozději 31. 12. 2005.</b> Text bez data nebo novější prostě zahodíme.</p>
+      <div class="flow"><span class="b">Text</span><span class="a">→</span><span class="b">Má datum ≤ 2005?</span><span class="a">→ ano →</span><span class="b">Databáze ✅</span><span class="a">/ ne →</span><span class="b">Zahodit ❌</span></div>
+      <p>U Wikipedie bereme verzi článku, jak vypadala na konci roku 2005. Článek o Facebooku nebo YouTube tak popisuje malou novou firmu, ne dnešního obra.</p>
+    </div>
+    <div class="deep">
+      <div class="label">Podrobně</div>
+      <p>Datum bereme ze zdroje (hlavička <code>Date:</code> u e-mailů a Usenetu, datum revize u Wikipedie, datum rozhodnutí u soudů). Pokud dokument prošel úpravami po roce 2005 (např. abstrakt arXiv s pozdější verzí), zahazujeme ho, protože text mohl být přepsán.</p>
+      <p>Při kontrole jsme našli 518 dokumentů s falešným „nulovým“ datem (1. 1. 1970 nebo 31. 12. 1979, typická výchozí hodnota chybné hlavičky). Ty jsme přesunuli mezi zamítnuté a parsery opravili. Zamítnuté dokumenty se ukládají do tabulky <code>rejected</code> s důvodem, aby šlo vše zpětně ověřit.</p>
+    </div>
+  </section>
+
+  <section class="step" id="k4">
+    <h2><span class="num">4</span>Uklízíme data <span class="status done">hotovo</span></h2>
+    <div class="simple">
+      <p>Staré texty z internetu obsahují nepořádek: dlouhé řady pomlček <code>-------</code>, stovky mezer za sebou nebo zakódované přílohy (obrázky a programy převedené na nesmyslná písmena <code>AAAAAAA…</code>). Model by se je učil jako text a plýtval na ně svou „hlavou“.</p>
+      <p>Proto texty před učením automaticky uklidíme. Normální věty zůstanou, odpad zmizí.</p>
+    </div>
+    <div class="deep">
+      <div class="label">Podrobně</div>
+      <p>Funkce <code>clean_text()</code> běží za běhu (databázi nepřepisuje): odstraní bloky uuencode a base64/MIME, zkrátí běhy mezer na max ~4 a opakované znaky na max ~8, sloučí víc prázdných řádků a odstraní řídicí znaky. Dokument, který po úklidu zkrátí pod 200 znaků, se přeskočí. V běžných zdrojích ubere úklid jen zlomek procenta textu. Po úklidu klesl počet „odpadních“ tokenů ve slovníku z 503 na 244.</p>
+    </div>
+  </section>
+
+  <section class="step" id="k5">
+    <h2><span class="num">5</span>Mícháme zdroje <span class="status done">hotovo</span></h2>
+    <div class="simple">
+      <p>Knih z 19. století a soudních rozsudků máme obrovské množství. Kdyby model četl hlavně je, mluvil by jako starý spisovatel nebo právník.</p>
+      <p>Proto zdroje mícháme jako recept: víc běžné řeči (diskuze, blogy, e-maily, Wikipedie) a jen trochu knih a soudních textů.</p>
+      <div class="analogy"><b>Přirovnání:</b> Jako když dítě učíš mluvit. Nečteš mu jen zákony a staré romány, ale hlavně s ním normálně mluvíš.</div>
+    </div>
+    <div class="deep">
+      <div class="label">Podrobně</div>
+      <p>Podíly podle znaků v <code>configs/mix.json</code>, přibližně: Usenet ~25 %, Wikipedie ~25 %, blogy ~15 %, knihy ~10 %, diskuze Wikipedie ~8 %, Enron ~7 %, soudy ~7 %, malé zdroje celé. Vzorkuje se po celých dokumentech, deterministicky (seed 2005), aby šel výsledek zopakovat.</p>
+    </div>
+  </section>
+
+  <section class="step" id="k6">
+    <h2><span class="num">6</span>Tokenizace: text na čísla <span class="status done">hotovo</span></h2>
+    <div class="simple">
+      <p>Počítač neumí číst písmena, umí jen počítat s čísly. Proto text rozsekáme na kousky (<b>tokeny</b>) a každý kousek dostane své číslo. Běžná slova jsou jeden kousek, vzácná slova se rozdělí na víc.</p>
+      <p>Takhle rozseká náš tokenizér jednu větu:</p>
+      <div class="tok" aria-label="Příklad tokenizace">
+        <span>Hi</span><span> Mark</span><span>,</span><span> please</span><span> find</span><span> attached</span><span> the</span><span> revised</span><span> Q</span><span>3</span><span> forecast</span><span>.</span>
+      </div>
+      <div class="ids">4120 · 2990 · 12 · 1802 · 1039 · 5573 · 264 · 12816 · 1261 · 19 · 20978 · 14</div>
+      <p>Slovo „iPod“ (nové v roce 2001) ale rozdělí na dva kousky <code>i</code> + <code>Pod</code>. Čím víc model slovo viděl, tím spíš je to jeden token.</p>
+      <p>Chceš si to vyzkoušet sám? Interaktivní ukázka je v <a href="/tokenizer/">Tokenizer Labu</a> (jen pro tým).</p>
+    </div>
+    <div class="deep">
+      <div class="label">Podrobně</div>
+      <p>Byte-level BPE (Byte Pair Encoding) se slovníkem 32 000 tokenů, natrénovaný jen na naší směsi (~3 mld. znaků) – žádný cizí slovník. Začne 256 bajty a opakovaně spojuje nejčastější dvojici sousedních symbolů do nového tokenu (<code>t</code>+<code>h</code> → <code>th</code>, <code>th</code>+<code>e</code> → <code>the</code>…), dokud nemá 32 000 položek. Speciální token <code>&lt;|endoftext|&gt;</code> odděluje dokumenty.</p>
+      <p>Výsledek: průměrně ~4 znaky na token, ukázkové věty se dekódují zpět beze ztráty. Trénink tokenizéru trvá ~14 minut.</p>
+    </div>
+  </section>
+
+  <section class="step" id="k7">
+    <h2><span class="num">7</span>Příprava trénovacích dat <span class="status done">hotovo</span></h2>
+    <div class="simple">
+      <p>Teď celou směs textů převedeme na jednu dlouhou řadu čísel a uložíme do souboru. Malý kousek (půl procenta) dáme stranou jako „zkoušku“: na těchto textech se model nikdy neučí a podle nich kontrolujeme, jestli se opravdu učí, nebo se jen šprtá nazpaměť.</p>
+      <div class="facts">
+        <div class="fact"><div class="v">782 mil.</div><div class="k">tokenů na učení (train.bin)</div></div>
+        <div class="fact"><div class="v">3,7 mil.</div><div class="k">tokenů na zkoušku (val.bin)</div></div>
+        <div class="fact"><div class="v">1,6 GB</div><div class="k">velikost souboru</div></div>
+      </div>
+    </div>
+    <div class="deep">
+      <div class="label">Podrobně</div>
+      <p><code>python -m llm2005.prepare</code> zakóduje dokumenty, vloží mezi ně <code>&lt;|endoftext|&gt;</code> a zapíše tokeny jako <code>uint16</code> (slovník &lt; 65 536) do <code>train.bin</code> a <code>val.bin</code>. Trénink pak čte náhodná okna přes memmap, takže se celý soubor nemusí vejít do RAM. Pro velký model (<code>base</code>) připravíme větší objem, cílem je ~2,5 mld. tokenů.</p>
+    </div>
+  </section>
+
+  <section class="step" id="k8">
+    <h2><span class="num">8</span>Trénink modelu <span class="status now">právě běží</span></h2>
+    <div class="simple">
+      <p>Teď začíná samotné učení. Model dostane kus textu, třeba „The Internet is a …“, a má hádat další slovo. Na začátku hádá úplně náhodně. Pokaždé se podívá, jak moc se spletl, a trochu se opraví. To se opakuje miliónkrát.</p>
+      <div class="analogy"><b>Přirovnání:</b> Jako když hraješ hru „dokonči větu“ a po každém pokusu ti někdo řekne správnou odpověď. Po milionu kol už odhaduješ docela dobře.</div>
+      <p>Učí se na grafické kartě (NVIDIA RTX 3060), protože ta umí obrovské množství výpočtů najednou. Malý model se učí hodiny, velký několik nocí.</p>
+    </div>
+    <div class="deep">
+      <div class="label">Podrobně</div>
+      <p>Optimalizujeme cross-entropy loss při predikci dalšího tokenu (AdamW, warmup + cosine schedule, smíšená přesnost). Model <code>small</code> má ~23 M parametrů, kontext 512 tokenů. Po opravě (paměť grafiky přetékala do sdílené RAM) běží rychlostí ~50–80 tisíc tokenů za sekundu a zabírá ~6 GB z 12 GB VRAM. Trénink běží s nízkou prioritou a průběžně ukládá checkpointy, takže jde kdykoli přerušit a navázat.</p>
+    </div>
+  </section>
+
+  <section class="step" id="k9">
+    <h2><span class="num">9</span>Jak poznáme, že se učí <span class="status now">sledujeme</span></h2>
+    <div class="simple">
+      <p>Měříme číslo, kterému se říká <b>loss</b> (ztráta). Říká, jak moc se model při hádání plete. <b>Čím menší, tím lepší.</b> Na začátku je kolem 10 (hádá naslepo), postupně klesá.</p>
+      <svg class="loss" viewBox="0 0 600 200" role="img" aria-label="Ilustrační graf: loss postupně klesá">
+        <line class="ax" x1="40" y1="170" x2="580" y2="170"/><line class="ax" x1="40" y1="20" x2="40" y2="170"/>
+        <path class="ln" d="M40 30 C 90 120, 140 135, 220 145 S 420 156, 580 160"/>
+        <text x="46" y="18">loss (chyba)</text><text x="500" y="190">čas učení →</text>
+        <text x="50" y="45">~10: náhoda</text><text x="430" y="150">nižší = lepší</text>
+      </svg>
+      <p>Druhá kontrola je jednodušší: necháme model psát a čteme, co vymyslí. Na začátku píše nesmysly, pak slova, pak gramaticky správné věty a nakonec věty, které dávají smysl.</p>
+    </div>
+    <div class="deep">
+      <div class="label">Podrobně</div>
+      <p>Sledujeme <i>train loss</i> i <i>val loss</i> (na odložených datech). Když train loss klesá, ale val loss roste, model se šprtá nazpaměť (overfitting) a je čas skončit. Loss 10,4 ≈ ln(32 000) odpovídá rovnoměrnému náhodnému hádání. Malý testovací model se během pár minut dostal z ~9,3 na ~6,1. Při každé evaluaci model generuje ukázky z promptů jako „The Internet is“ nebo „In 2005, the most popular“.</p>
+    </div>
+  </section>
+
+  <section class="step" id="k10">
+    <h2><span class="num">10</span>Chat na webu <span class="status todo">plán</span></h2>
+    <div class="simple">
+      <p>Až bude velký model natrénovaný, dáme ho na web <a href="/">chronosllm.com</a>. Kdokoli si s ním bude moct popovídat a zkusit, co ví o světě v roce 2005, a co naopak vůbec netuší.</p>
+    </div>
+    <div class="deep">
+      <div class="label">Podrobně</div>
+      <p>Hotový model (~250–500 MB vah) poběží jako webová aplikace (Django) na malém serveru nebo na našem PC přes Cloudflare Tunnel. Inference modelu 125 M zvládne i procesor. Plánujeme limity požadavků, maximální délku odpovědi a žádné ukládání konverzací.</p>
+      <p><b>Harmonogram:</b> malý model do 20. 12. 2026, velký model a chat do 31. 1. 2027, vyhodnocení a obhajoba do 28. 2. 2027.</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  ChronosLLM · ročníková práce 3.F · Holeček, Gregor, Milý ·
+  <a href="https://github.com/krystofholecek/rocnikovka3f_2026">GitHub</a> · <a href="/">Zpět na úvod</a>
+</footer>
+
+<script>
+(function(){
+  var btns=document.querySelectorAll('.switch button');
+  function setLevel(l){
+    document.body.setAttribute('data-level',l);
+    btns.forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.level===l));});
+    try{localStorage.setItem('level',l);}catch(e){}
+  }
+  btns.forEach(function(b){b.addEventListener('click',function(){setLevel(b.dataset.level);});});
+  try{var s=localStorage.getItem('level'); if(s) setLevel(s);}catch(e){}
+  var root=document.documentElement, t=document.getElementById('theme');
+  function dark(){var a=root.getAttribute('data-theme'); if(a) return a==='dark'; return matchMedia('(prefers-color-scheme: dark)').matches;}
+  t.addEventListener('click',function(){var d=!dark(); root.setAttribute('data-theme',d?'dark':'light'); try{localStorage.setItem('theme',d?'dark':'light');}catch(e){}});
+  try{var th=localStorage.getItem('theme'); if(th) root.setAttribute('data-theme',th);}catch(e){}
+})();
+</script>
+</body>
+</html>

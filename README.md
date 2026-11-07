@@ -189,7 +189,9 @@ configs/          velikosti modelu a nastavení tréninku
 config/ core/ templates/ static/   kostra webového chatu (Django)
 data/, checkpoints/                data a natrénované modely (nejsou v gitu, jsou velké)
 tools/progress/                    stránka živého přehledu (jeden HTML soubor)
+web/landing/, web/postup/          úvodní stránka a postup krok za krokem (chronosllm.com)
 web/tokenizer-lab/                 samostatný doprovodný web (viz níže)
+scripts/build_site.py, wrangler.jsonc   složení a nasazení webu (viz níže)
 ```
 
 ### Doprovodný web: Tokenizer Lab
@@ -198,6 +200,12 @@ Složka [`web/tokenizer-lab/`](web/tokenizer-lab/README.md) je **samostatný pro
 který v prohlížeči ukazuje, jak náš BPE tokenizér skládá tokeny (trénink krok za krokem, barevné tokeny, pipeline
 `prepare`). S hlavním projektem nesdílí kód, má vlastní README a testy a hlavní projekt na něm nezávisí. Běží na
 [chronosllm.com/tokenizer](https://chronosllm.com/tokenizer/) (přístup jen pro tým).
+
+### Nasazení webu
+
+Web [chronosllm.com](https://chronosllm.com) se nasazuje automaticky přes Cloudflare Workers Builds po každém mergi do `main`.
+Build příkaz `python scripts/build_site.py` složí úvodní stránku, postup a Tokenizer Lab do složky `dist/`.
+Deploy příkaz `npx wrangler deploy` pak podle `wrangler.jsonc` nahraje obsah `dist/` jako statické soubory.
 
 ## Plán
 

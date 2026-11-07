@@ -25,3 +25,7 @@ checkpoints/
 *.pt
 *.7z
 *.bz2
+
+# Web: složený výstup scripts/build_site.py (nasazuje Cloudflare)
+dist/
+.wrangler/

@@ -6,7 +6,11 @@ Výsledek:
   dist/index.html         <- web/landing/index.html   (úvodní stránka)
   dist/postup/            <- web/postup/              (postup krok za krokem)
   dist/tokenizer/         <- web/tokenizer-lab/       (jen soubory potřebné za běhu)
+  dist/chat/              <- web/chat/                (chat; adresa API z proměnné CHAT_API_URL)
   dist/version.json       <- commit, větev a čas buildu (ověření nasazené verze)
+
+Adresa API chatu: proměnná prostředí CHAT_API_URL (výchozí https://api.chronosllm.com).
+Lokálně např.:  CHAT_API_URL=http://127.0.0.1:8000 python scripts/build_site.py
 
 Používá jen standardní knihovnu Pythonu, nic se neinstaluje.
 """
@@ -27,6 +31,27 @@ DIST = ROOT / "dist"
 # Testy, node_modules, README a package*.json na web nepatří.
 RUNTIME_SUFFIXES = {".html", ".css", ".js"}
 SKIP_DIRS = {"tests", "node_modules"}
+
+DEFAULT_CHAT_API_URL = "https://api.chronosllm.com"
+API_PLACEHOLDER = "__CHAT_API_URL__"
+
+
+def chat_api_url() -> str:
+    """Adresa API chatu z CHAT_API_URL; jen https:// (nebo http:// pro lokální vývoj)."""
+    url = os.environ.get("CHAT_API_URL", "").strip().rstrip("/") or DEFAULT_CHAT_API_URL
+    local = url.startswith(("http://localhost", "http://127.0.0.1"))
+    if not (url.startswith("https://") or local) or any(c in url for c in "\"'<> "):
+        raise SystemExit(f"Neplatná CHAT_API_URL: {url!r} (čekám https://… nebo http://localhost…)")
+    return url
+
+
+def fill_api_url(folder: Path, url: str) -> None:
+    """Doplní adresu API do stránek chatu (místo zástupného textu __CHAT_API_URL__)."""
+    for path in folder.rglob("*"):
+        if path.suffix in {".html", ".js"}:
+            text = path.read_text(encoding="utf-8")
+            if API_PLACEHOLDER in text:
+                path.write_text(text.replace(API_PLACEHOLDER, url), encoding="utf-8", newline="\n")
 
 
 def copy_runtime(src: Path, dst: Path) -> None:
@@ -69,6 +94,7 @@ def version_info() -> dict:
         "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "source": "workers-builds" if on_ci else "local",
         "build_id": os.environ.get("WORKERS_CI_BUILD_UUID"),
+        "chat_api": chat_api_url(),
     }
 
 
@@ -81,12 +107,14 @@ def build() -> list[Path]:
     shutil.copy2(WEB / "landing" / "index.html", DIST / "index.html")
     copy_runtime(WEB / "postup", DIST / "postup")
     copy_runtime(WEB / "tokenizer-lab", DIST / "tokenizer")
+    copy_runtime(WEB / "chat", DIST / "chat")
+    fill_api_url(DIST / "chat", chat_api_url())
     (DIST / "version.json").write_text(
         json.dumps(version_info(), indent=2) + "\n", encoding="utf-8"
     )
 
     # Kontrola: bez těchto stránek by web nefungoval, build má radši spadnout.
-    for required in ("index.html", "postup/index.html", "tokenizer/index.html"):
+    for required in ("index.html", "postup/index.html", "tokenizer/index.html", "chat/index.html"):
         if not (DIST / required).is_file():
             raise SystemExit(f"Chybí {required} – build se nepovedl.")
 

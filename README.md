@@ -56,6 +56,8 @@ flowchart LR
 | 6. Vyzkoušet model | `python -m llm2005.sample --config configs/small.json --prompt "The Internet is"` | vygenerovaný text |
 
 Trénink se průběžně ukládá. Když ho spustíš znovu, pokračuje tam, kde skončil, takže jde běžet po nocích.
+Běží s nižší prioritou a se stropem paměti grafiky, aby počítač zůstal použitelný. Proč: [docs/trenink-rychlost.md](docs/trenink-rychlost.md)
+(model `small` ~85 000 tokenů/s na RTX 3060, před opravou ~2 000 kvůli přetečení paměti GPU).
 
 ## Data
 

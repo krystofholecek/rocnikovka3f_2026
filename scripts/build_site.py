@@ -6,12 +6,17 @@ Výsledek:
   dist/index.html         <- web/landing/index.html   (úvodní stránka)
   dist/postup/            <- web/postup/              (postup krok za krokem)
   dist/tokenizer/         <- web/tokenizer-lab/       (jen soubory potřebné za běhu)
+  dist/version.json       <- commit, větev a čas buildu (ověření nasazené verze)
 
 Používá jen standardní knihovnu Pythonu, nic se neinstaluje.
 """
 
+import json
+import os
 import shutil
+import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -37,6 +42,36 @@ def copy_runtime(src: Path, dst: Path) -> None:
         shutil.copy2(path, target)
 
 
+def git(*args: str) -> str | None:
+    """Vrátí výstup příkazu git, nebo None, když git není k dispozici."""
+    try:
+        out = subprocess.run(
+            ["git", *args], cwd=ROOT, capture_output=True, text=True, check=True
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return out.stdout.strip() or None
+
+
+def version_info() -> dict:
+    """Commit, větev a čas buildu.
+
+    Na Cloudflare Workers Builds se berou proměnné WORKERS_CI_COMMIT_SHA
+    a WORKERS_CI_BRANCH (https://developers.cloudflare.com/workers/ci-cd/builds/configuration/),
+    lokálně se zjistí přes git.
+    """
+    on_ci = os.environ.get("WORKERS_CI") == "1"
+    commit = os.environ.get("WORKERS_CI_COMMIT_SHA") or git("rev-parse", "HEAD")
+    branch = os.environ.get("WORKERS_CI_BRANCH") or git("rev-parse", "--abbrev-ref", "HEAD")
+    return {
+        "commit": commit,
+        "branch": branch,
+        "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "source": "workers-builds" if on_ci else "local",
+        "build_id": os.environ.get("WORKERS_CI_BUILD_UUID"),
+    }
+
+
 def build() -> list[Path]:
     """Smaže dist/, znovu ho složí a vrátí seznam vytvořených souborů."""
     if DIST.exists():
@@ -46,6 +81,9 @@ def build() -> list[Path]:
     shutil.copy2(WEB / "landing" / "index.html", DIST / "index.html")
     copy_runtime(WEB / "postup", DIST / "postup")
     copy_runtime(WEB / "tokenizer-lab", DIST / "tokenizer")
+    (DIST / "version.json").write_text(
+        json.dumps(version_info(), indent=2) + "\n", encoding="utf-8"
+    )
 
     # Kontrola: bez těchto stránek by web nefungoval, build má radši spadnout.
     for required in ("index.html", "postup/index.html", "tokenizer/index.html"):
